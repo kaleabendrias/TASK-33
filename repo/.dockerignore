@@ -1,0 +1,8 @@
+.git
+src/vendor
+src/node_modules
+src/storage/logs/*
+src/.phpunit.cache
+unit_tests
+API_tests
+run_tests.sh

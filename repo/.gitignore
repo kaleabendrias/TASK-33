@@ -1,0 +1,10 @@
+src/vendor/
+src/node_modules/
+src/storage/logs/*.log
+src/.phpunit.cache/
+src/bootstrap/cache/*.php
+!src/bootstrap/cache/.gitkeep
+.env
+.env.*
+!.env.example
+.claude/
