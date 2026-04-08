@@ -8,3 +8,10 @@ src/bootstrap/cache/*.php
 .env.*
 !.env.example
 .claude/
+
+src/storage/framework/sessions/*
+src/storage/framework/views/*
+src/storage/framework/cache/*
+!src/storage/framework/sessions/.gitignore
+!src/storage/framework/views/.gitignore
+!src/storage/framework/cache/.gitignore
