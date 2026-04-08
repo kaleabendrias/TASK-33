@@ -11,6 +11,7 @@ use App\Domain\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
 class OrderApiController extends Controller
@@ -122,14 +123,37 @@ class OrderApiController extends Controller
 
     public function refund(Request $request, int $id): JsonResponse
     {
-        $order = Order::findOrFail($id);
-        Gate::authorize('refund', $order);
-
         $request->validate(['reason' => 'nullable|string|max:500']);
 
-        $refund = $this->settlement->processRefund($order, $request->input('reason'));
+        // Refund processing must be atomic and idempotent. We:
+        //   1. Open a transaction.
+        //   2. Re-fetch the order with `lockForUpdate()` so concurrent
+        //      callers serialise on the row.
+        //   3. Re-evaluate the policy INSIDE the lock — the freshly
+        //      loaded `refunded_at` makes the duplicate branch a clean
+        //      403 instead of an exception or a double-pay.
+        //   4. Stamp `refunded_at` BEFORE delegating to the service so
+        //      any later code path observes the row as already refunded.
+        // The lockForUpdate ensures a second concurrent request blocks
+        // until this transaction commits, then sees `refunded_at != null`
+        // and is rejected by the policy gate above.
+        return DB::transaction(function () use ($request, $id) {
+            $order = Order::lockForUpdate()->findOrFail($id);
 
-        return response()->json(['data' => $refund, 'message' => 'Refund processed.']);
+            // State-gate + idempotency live in the policy. Re-running it
+            // here under the lock makes the check race-free.
+            Gate::authorize('refund', $order);
+
+            $refund = $this->settlement->processRefund($order, $request->input('reason'));
+
+            // Stamp the idempotency guard. The service also flips
+            // status → 'refunded', but the timestamp is the canonical
+            // single-shot marker so the policy can reject duplicates
+            // even if a future code path opens a new status branch.
+            $order->update(['refunded_at' => now()]);
+
+            return response()->json(['data' => $refund, 'message' => 'Refund processed.']);
+        });
     }
 
     /**

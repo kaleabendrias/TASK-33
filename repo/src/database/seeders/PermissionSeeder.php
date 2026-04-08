@@ -28,6 +28,10 @@ class PermissionSeeder extends Seeder
             // Pricing Baselines
             ['slug' => 'pricing-baselines.create', 'description' => 'Create pricing baselines', 'group' => 'pricing-baselines'],
             ['slug' => 'pricing-baselines.update', 'description' => 'Update pricing baselines', 'group' => 'pricing-baselines'],
+
+            // Settlements (button-level: admin can generate/finalize)
+            ['slug' => 'settlements.generate', 'description' => 'Generate settlements', 'group' => 'settlements'],
+            ['slug' => 'settlements.finalize', 'description' => 'Finalize settlements', 'group' => 'settlements'],
         ];
 
         foreach ($permissions as $p) {
@@ -36,20 +40,18 @@ class PermissionSeeder extends Seeder
 
         // ── Assign permissions to roles ─────────────────────────────
         // admin gets everything implicitly — no rows needed.
-
+        //
+        // Per the original requirements, foundational entities (service
+        // areas, system roles, resources, pricing baselines) are
+        // ADMIN-ONLY for all write operations. Staff and group-leaders
+        // must not be able to mutate billing or operational baselines;
+        // their write surface is limited to operational order/booking
+        // flows handled elsewhere.
         $rolePermissions = [
-            // group-leader: all write operations
-            'group-leader' => [
-                'service-areas.create', 'service-areas.update',
-                'roles.create', 'roles.update',
-                'resources.create', 'resources.update', 'resources.transition',
-                'pricing-baselines.create', 'pricing-baselines.update',
-            ],
-            // staff: can create/update resources and pricing, transition status
-            'staff' => [
-                'resources.create', 'resources.update', 'resources.transition',
-                'pricing-baselines.create', 'pricing-baselines.update',
-            ],
+            // group-leader: read-only on foundational entities
+            'group-leader' => [],
+            // staff: read-only on foundational entities
+            'staff' => [],
             // user: read-only, no write permissions
         ];
 

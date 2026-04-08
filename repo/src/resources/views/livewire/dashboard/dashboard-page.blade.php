@@ -1,6 +1,20 @@
 <div>
     <h1 class="text-2xl font-bold text-surface-900 mb-6">Dashboard</h1>
 
+    {{-- Date-range selector. Live wire:model so the cards requery as
+         soon as either input changes. The default mirrors the legacy
+         "current month" view, but operators can now zoom in or out. --}}
+    <div class="flex flex-wrap items-end gap-3 mb-6" aria-label="Dashboard date range">
+        <div>
+            <label class="block text-sm font-medium text-surface-700 mb-1" for="dash-from">From</label>
+            <input id="dash-from" wire:model.live="dateFrom" type="date" class="rounded-lg border-surface-200 text-sm"/>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-surface-700 mb-1" for="dash-to">To</label>
+            <input id="dash-to" wire:model.live="dateTo" type="date" class="rounded-lg border-surface-200 text-sm"/>
+        </div>
+    </div>
+
     {{-- KPI Cards --}}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" role="region" aria-label="Key metrics">
         <x-stat-card label="Available Items" :value="$totalItems" icon="calendar" />
@@ -8,7 +22,7 @@
         @if(in_array($role, ['staff','group-leader','admin']))
             <x-stat-card label="Today's Orders" :value="$todayOrders ?? 0" icon="clipboard" />
             <x-stat-card label="Active Orders"  :value="$activeOrders ?? 0" icon="check" />
-            <x-stat-card label="Month Revenue"  :value="'$'.number_format($monthRevenue ?? 0, 2)" icon="banknotes" />
+            <x-stat-card label="Range Revenue"  :value="'$'.number_format($rangeRevenue ?? $monthRevenue ?? 0, 2)" icon="banknotes" />
         @endif
     </div>
 

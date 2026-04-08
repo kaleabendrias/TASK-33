@@ -257,4 +257,55 @@ class BookingServiceTest extends TestCase
         $order = $this->service->transitionOrder($order, 'completed');
         $this->assertEquals('completed', $order->status);
     }
+
+    // --- Stale draft cleanup ---
+
+    public function test_cleanup_stale_drafts_cancels_old_drafts_only(): void
+    {
+        $item = $this->makeItem();
+        // Old draft (>= cutoff)
+        $oldDraft = $this->service->createOrder($this->user->id, [
+            ['bookable_item_id' => $item->id, 'booking_date' => '2027-01-01', 'quantity' => 1],
+        ]);
+        \App\Domain\Models\Order::where('id', $oldDraft->id)
+            ->update(['created_at' => now()->subHours(3)]);
+
+        // Recent draft — must NOT be touched
+        $recent = $this->service->createOrder($this->user->id, [
+            ['bookable_item_id' => $item->id, 'booking_date' => '2027-01-02', 'quantity' => 1],
+        ]);
+
+        $count = $this->service->cleanupStaleDrafts(60);
+        $this->assertSame(1, $count);
+        $this->assertSame('cancelled', $oldDraft->fresh()->status);
+        $this->assertSame('draft', $recent->fresh()->status);
+    }
+
+    // --- Consumable inventory: reserve / restore ---
+
+    public function test_pending_transition_decrements_consumable_stock(): void
+    {
+        $consumable = $this->makeItem([
+            'type' => 'consumable', 'unit_price' => 5, 'tax_rate' => 0, 'stock' => 10,
+        ]);
+        $order = $this->service->createOrder($this->user->id, [
+            ['bookable_item_id' => $consumable->id, 'booking_date' => '2027-02-01', 'quantity' => 3],
+        ]);
+        $this->service->transitionOrder($order, 'pending');
+        $this->assertSame(7, (int) $consumable->fresh()->stock);
+    }
+
+    public function test_cancel_after_pending_restores_stock(): void
+    {
+        $consumable = $this->makeItem([
+            'type' => 'consumable', 'unit_price' => 5, 'tax_rate' => 0, 'stock' => 5,
+        ]);
+        $order = $this->service->createOrder($this->user->id, [
+            ['bookable_item_id' => $consumable->id, 'booking_date' => '2027-02-02', 'quantity' => 2],
+        ]);
+        $this->service->transitionOrder($order, 'pending');
+        $this->assertSame(3, (int) $consumable->fresh()->stock);
+        $this->service->transitionOrder($order, 'cancelled', 'reason');
+        $this->assertSame(5, (int) $consumable->fresh()->stock);
+    }
 }

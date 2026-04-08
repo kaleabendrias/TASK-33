@@ -8,16 +8,16 @@
         <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
             <h2 class="text-lg font-semibold mb-4">Account</h2>
             <dl class="space-y-3 text-sm">
-                <div class="flex justify-between"><dt class="text-surface-500">Username</dt><dd class="font-medium"><?php echo e($user->username); ?></dd></div>
-                <div class="flex justify-between"><dt class="text-surface-500">Full Name</dt><dd class="font-medium"><?php echo e($user->full_name); ?></dd></div>
-                <div class="flex justify-between"><dt class="text-surface-500">Role</dt><dd><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-100 text-brand-800"><?php echo e(ucfirst($user->role)); ?></span></dd></div>
+                <div class="flex justify-between"><dt class="text-surface-500">Username</dt><dd class="font-medium"><?php echo e($user['username'] ?? ''); ?></dd></div>
+                <div class="flex justify-between"><dt class="text-surface-500">Full Name</dt><dd class="font-medium"><?php echo e($user['full_name'] ?? ''); ?></dd></div>
+                <div class="flex justify-between"><dt class="text-surface-500">Role</dt><dd><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-100 text-brand-800"><?php echo e(ucfirst($user['role'] ?? '')); ?></span></dd></div>
             </dl>
         </div>
 
         
         <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
             <h2 class="text-lg font-semibold mb-4">Staff Details</h2>
-            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(!$profile || !$profile->isComplete()): ?>
+            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php if(!$isComplete): ?>
                 <div class="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-amber-800 text-sm" role="alert">
                     <?php if (isset($component)) { $__componentOriginalce262628e3a8d44dc38fd1f3965181bc = $component; } ?>
 <?php if (isset($attributes)) { $__attributesOriginalce262628e3a8d44dc38fd1f3965181bc = $attributes; } ?>

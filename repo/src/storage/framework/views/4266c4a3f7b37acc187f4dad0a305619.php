@@ -28,8 +28,9 @@
                 <label for="item-select" class="block text-sm font-medium text-surface-700 mb-1">Item</label>
                 <select wire:model.live="selectedItemId" id="item-select" class="w-full rounded-lg border-surface-200 text-sm" aria-label="Select bookable item">
                     <option value="">Choose…</option>
+                    
                     <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__currentLoopData = $items; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $item): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
-                        <option value="<?php echo e($item->id); ?>"><?php echo e($item->name); ?> (<?php echo e(ucfirst($item->type)); ?>)</option>
+                        <option value="<?php echo e($item['id'] ?? ''); ?>"><?php echo e($item['name'] ?? ''); ?> (<?php echo e(ucfirst($item['type'] ?? '')); ?>)</option>
                     <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
                 </select>
             </div>

@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Booking;
 
-use App\Application\Services\BookingService;
 use App\Livewire\Concerns\UsesApiClient;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -62,18 +61,19 @@ class BookingCreate extends Component
         $this->availabilityMsg = ($data['available'] ?? false) ? 'Available' : 'Unavailable: ' . implode(' ', $data['conflicts'] ?? []);
     }
 
-    public function addLineItem(BookingService $booking): void
+    public function addLineItem(): void
     {
         if (!$this->selectedItemId || !$this->bookingDate) return;
 
         // Capture the item name ONCE at add-to-cart time so the view never
-        // has to round-trip to the database. listActiveItems() is paginated
-        // to a generous page size — for the catalog sizes this product
-        // targets, the cache is effectively the entire menu.
+        // has to round-trip to the database. The catalog is fetched via
+        // the API so authorization parity with REST clients is preserved.
         if (!isset($this->itemNames[$this->selectedItemId])) {
-            $cached = $booking->listActiveItems(perPage: 200)->getCollection();
-            foreach ($cached as $item) {
-                $this->itemNames[$item->id] = $item->name;
+            $resp = $this->api()->get('/bookings/items', ['per_page' => 200]);
+            if ($resp->successful()) {
+                foreach (($resp->json('data') ?? []) as $item) {
+                    $this->itemNames[$item['id']] = $item['name'];
+                }
             }
         }
 
@@ -159,9 +159,13 @@ class BookingCreate extends Component
         $this->redirect('/orders/' . $order['id']);
     }
 
-    public function render(BookingService $booking)
+    public function render()
     {
-        $items = $booking->listActiveItems(perPage: 100)->getCollection();
+        // Read the catalog via the API so the same authorization and
+        // scoping rules apply as for REST consumers — Livewire never
+        // touches models or services directly for reads.
+        $resp = $this->api()->get('/bookings/items', ['per_page' => 100]);
+        $items = $resp->successful() ? ($resp->json('data') ?? []) : [];
         return view('livewire.booking.booking-create', ['items' => $items]);
     }
 }

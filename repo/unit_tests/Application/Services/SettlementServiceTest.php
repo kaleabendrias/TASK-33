@@ -229,4 +229,72 @@ class SettlementServiceTest extends TestCase
         $this->assertEquals(40.00, (float) $commissions[0]->attributed_revenue);
         $this->assertEquals(4.00, (float) $commissions[0]->commission_amount);
     }
+
+    // --- Group leader location-binding ---
+
+    public function test_commission_excluded_when_item_location_mismatches_assignment(): void
+    {
+        // Assignment carries a specific location → only orders whose
+        // bookable items are in THAT location count toward commission.
+        $this->leader->groupLeaderAssignments?->each->delete();
+        GroupLeaderAssignment::where('user_id', $this->leader->id)->delete();
+        GroupLeaderAssignment::create([
+            'user_id'         => $this->leader->id,
+            'service_area_id' => $this->sa->id,
+            'location'        => 'Building-A',
+            'is_active'       => true,
+        ]);
+
+        $matchingItem = BookableItem::create([
+            'type' => 'room', 'name' => 'BindOK', 'location' => 'Building-A',
+            'daily_rate' => 100, 'tax_rate' => 0, 'capacity' => 5, 'is_active' => true,
+        ]);
+        $order = $this->bookWithLeader($matchingItem, '2026-08-12');
+        $this->booking->transitionOrder($order, 'checked_in');
+        $this->booking->transitionOrder($order->refresh(), 'checked_out');
+        $this->booking->transitionOrder($order->refresh(), 'completed');
+
+        $commissions = $this->service->calculateCommissions('2026-01-01', '2026-12-31');
+        $this->assertNotEmpty($commissions);
+        $this->assertEquals(100.00, (float) $commissions[0]->attributed_revenue);
+    }
+
+    public function test_create_order_rejects_leader_when_item_location_does_not_match(): void
+    {
+        // The leader's assignment narrows them to Building-A but the
+        // booked item lives in Building-B → createOrder must reject
+        // with a ValidationException naming `group_leader_id`.
+        GroupLeaderAssignment::where('user_id', $this->leader->id)->delete();
+        GroupLeaderAssignment::create([
+            'user_id'         => $this->leader->id,
+            'service_area_id' => $this->sa->id,
+            'location'        => 'Building-A',
+            'is_active'       => true,
+        ]);
+
+        $offsiteItem = BookableItem::create([
+            'type' => 'room', 'name' => 'BindNo', 'location' => 'Building-B',
+            'daily_rate' => 100, 'tax_rate' => 0, 'capacity' => 5, 'is_active' => true,
+        ]);
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        $this->booking->createOrder($this->user->id, [
+            ['bookable_item_id' => $offsiteItem->id, 'booking_date' => '2026-08-13', 'quantity' => 1],
+        ], $this->leader->id, $this->sa->id);
+    }
+
+    public function test_process_refund_is_idempotent_at_service_level(): void
+    {
+        // Belt-and-suspenders: even if a caller skips the controller's
+        // policy gate, the second processRefund must still flip the
+        // order to 'refunded' on the first call so the policy gate
+        // (which checks `status === refunded`) catches the duplicate.
+        $item = $this->makeItem();
+        $order = $this->bookApproved($item, '2026-09-15');
+        $this->booking->transitionOrder($order, 'checked_in');
+        $this->booking->transitionOrder($order->refresh(), 'checked_out');
+        $order->refresh()->update(['confirmed_at' => now()->subHour()]);
+        $this->service->processRefund($order->refresh(), 'first');
+        $this->assertEquals('refunded', $order->fresh()->status);
+    }
 }

@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Profile;
 
-use App\Application\Services\StaffProfileService;
 use App\Livewire\Concerns\UsesApiClient;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -18,15 +17,18 @@ class StaffProfilePage extends Component
     public string $title = '';
     public bool $saved = false;
 
-    public function mount(StaffProfileService $profiles): void
+    public function mount(): void
     {
-        $user = auth()->user() ?? request()->attributes->get('auth_user');
-        if (!$user) abort(401);
-        $profile = $profiles->findForUser($user);
-        if ($profile) {
-            $this->employee_id = $profile->employee_id ?? '';
-            $this->department = $profile->department ?? '';
-            $this->title = $profile->title ?? '';
+        // Read through the API to keep authorization parity with REST
+        // clients. The endpoint enforces auth via jwt.auth middleware
+        // and only ever exposes the caller's own profile.
+        $resp = $this->api()->get('/profile');
+        if ($resp->status() === 401) abort(401);
+        if ($resp->successful()) {
+            $profile = $resp->json('data') ?? [];
+            $this->employee_id = $profile['employee_id'] ?? '';
+            $this->department  = $profile['department'] ?? '';
+            $this->title       = $profile['title'] ?? '';
         }
     }
 
@@ -47,11 +49,23 @@ class StaffProfilePage extends Component
         $this->saved = $resp->successful();
     }
 
-    public function render(StaffProfileService $profiles)
+    public function render()
     {
-        $user = auth()->user() ?? request()->attributes->get('auth_user');
-        if (!$user) abort(401);
-        $profile = $profiles->findForUser($user);
-        return view('livewire.profile.staff-profile-page', ['profile' => $profile, 'user' => $user]);
+        // Read through the API — authorization is enforced by jwt.auth.
+        $resp = $this->api()->get('/profile');
+        if ($resp->status() === 401) abort(401);
+        $payload = $resp->successful() ? ($resp->json() ?? []) : [];
+
+        // The /auth/me endpoint exposes the caller's own user record;
+        // route this through the API too rather than reaching into the
+        // request attributes for the auth user.
+        $meResp = $this->api()->get('/auth/me');
+        $user = $meResp->successful() ? ($meResp->json('data') ?? []) : [];
+
+        return view('livewire.profile.staff-profile-page', [
+            'profile'    => $payload['data'] ?? null,
+            'isComplete' => $payload['is_complete'] ?? false,
+            'user'       => $user,
+        ]);
     }
 }

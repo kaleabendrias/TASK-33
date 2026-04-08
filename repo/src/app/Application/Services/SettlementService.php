@@ -141,7 +141,7 @@ class SettlementService
             ->pluck('id')
             ->all();
 
-        $orders = Order::with('refunds')
+        $orders = Order::with(['refunds', 'lineItems.bookableItem'])
             ->whereBetween('confirmed_at', [$cycleStart, $cycleEnd . ' 23:59:59'])
             ->whereIn('status', ['completed', 'checked_out'])
             ->whereNotNull('group_leader_id')
@@ -155,10 +155,27 @@ class SettlementService
                 $leader = User::find($o->group_leader_id);
                 if ($leader && $leader->role === 'admin') return true;
                 if (!$o->service_area_id) return false;
-                return GroupLeaderAssignment::where('user_id', $o->group_leader_id)
+
+                $assignment = GroupLeaderAssignment::where('user_id', $o->group_leader_id)
                     ->where('service_area_id', $o->service_area_id)
                     ->where('is_active', true)
-                    ->exists();
+                    ->first();
+                if (!$assignment) return false;
+
+                // Location binding (mirrors BookingService::createOrder).
+                // A NULL/blank assignment.location covers the entire
+                // service area; a set location requires every line item's
+                // bookable_item.location to match exactly. Items with a
+                // NULL location are NOT covered by a location-bound
+                // assignment, so the order is excluded from commission.
+                $assigned = $this->normalizeLocation($assignment->location);
+                if ($assigned === null) return true;
+
+                foreach ($o->lineItems as $li) {
+                    $itemLoc = $this->normalizeLocation(optional($li->bookableItem)->location);
+                    if ($itemLoc !== $assigned) return false;
+                }
+                return true;
             })
             ->groupBy('group_leader_id');
 
@@ -362,5 +379,18 @@ class SettlementService
         }
 
         return $discrepancies;
+    }
+
+    /**
+     * Normalize a location string for binding comparisons. Returns null
+     * for blank/whitespace values so callers can distinguish "no
+     * location constraint" from a real value.
+     */
+    private function normalizeLocation(?string $location): ?string
+    {
+        if ($location === null) return null;
+        $trimmed = trim($location);
+        if ($trimmed === '') return null;
+        return mb_strtolower($trimmed);
     }
 }

@@ -2,12 +2,7 @@
 
 namespace App\Livewire\Orders;
 
-use App\Application\Services\OrderQueryService;
-use App\Domain\Models\Order;
-use App\Domain\Policies\OrderPolicy;
 use App\Livewire\Concerns\UsesApiClient;
-use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -25,59 +20,50 @@ class OrderShow extends Component
     public function mount(int $orderId): void
     {
         $this->orderId = $orderId;
-        // Authorize on first load — abort with 403 if not allowed to view.
-        $order = Order::findOrFail($orderId);
-        if (!Gate::allows('view', $order)) {
+        // Authorize on first load by going through the API. The
+        // OrderApiController already runs Gate::authorize('view', ...),
+        // so we get authorization parity with REST consumers without
+        // touching the model directly here.
+        $resp = $this->api()->get("/orders/{$orderId}");
+        if ($resp->status() === 403) {
             abort(403, 'You are not authorized to view this order.');
+        }
+        if ($resp->status() === 404) {
+            abort(404);
+        }
+        if ($resp->failed()) {
+            abort(500, 'Failed to load order.');
         }
     }
 
-    public function checkIn(): void { $this->guardOperational('checked_in') && $this->callTransition('checked_in'); }
-    public function checkOut(): void { $this->guardOperational('checked_out') && $this->callTransition('checked_out'); }
-    public function complete(): void { $this->guardOperational('completed') && $this->callTransition('completed'); }
+    public function checkIn(): void { $this->callTransition('checked_in'); }
+    public function checkOut(): void { $this->callTransition('checked_out'); }
+    public function complete(): void { $this->callTransition('completed'); }
 
     public function cancel(): void
     {
-        // Self-service: gate authorize against the policy before calling the API.
-        $order = Order::findOrFail($this->orderId);
-        if (!Gate::allows('transition', [$order, 'cancelled'])) {
-            $this->error = 'You are not authorized to cancel this order.';
-            return;
-        }
+        // Authorization is enforced by the API endpoint via Gate::authorize.
         $this->callTransition('cancelled', $this->cancelReason ?: null);
     }
 
     public function refund(): void
     {
-        $order = Order::findOrFail($this->orderId);
-        if (!Gate::allows('refund', $order)) {
+        $resp = $this->api()->post("/orders/{$this->orderId}/refund", ['reason' => 'Customer requested']);
+        if ($resp->status() === 403) {
             $this->error = 'You are not authorized to refund this order.';
             return;
         }
-        $resp = $this->api()->post("/orders/{$this->orderId}/refund", ['reason' => 'Customer requested']);
         if ($resp->failed()) { $this->error = $resp->json('message') ?? 'Refund failed.'; }
     }
 
     public function markUnavailable(): void
     {
-        $order = Order::findOrFail($this->orderId);
-        if (!Gate::allows('markUnavailable', $order)) {
+        $resp = $this->api()->post("/orders/{$this->orderId}/mark-unavailable");
+        if ($resp->status() === 403) {
             $this->error = 'You are not authorized.';
             return;
         }
-        $resp = $this->api()->post("/orders/{$this->orderId}/mark-unavailable");
         if ($resp->failed()) { $this->error = $resp->json('message') ?? 'Failed.'; }
-    }
-
-    /** Defense-in-depth: only staff+ may invoke operational transitions in the UI. */
-    private function guardOperational(string $newStatus): bool
-    {
-        $order = Order::findOrFail($this->orderId);
-        if (!Gate::allows('transition', [$order, $newStatus])) {
-            $this->error = 'You are not authorized to perform this operational action.';
-            return false;
-        }
-        return true;
     }
 
     private function callTransition(string $status, ?string $reason = null): void
@@ -86,16 +72,25 @@ class OrderShow extends Component
             'status' => $status,
             'reason' => $reason,
         ]);
+        if ($resp->status() === 403) {
+            $this->error = 'You are not authorized to perform this operational action.';
+            return;
+        }
         if ($resp->failed()) { $this->error = $resp->json('message') ?? 'Transition failed.'; }
     }
 
-    public function render(OrderQueryService $orders)
+    public function render()
     {
-        $order = $orders->findWithDetail($this->orderId);
-        // Re-authorize on every render — context can change.
-        if (!Gate::allows('view', $order)) {
+        // Read through the API so authorization is enforced uniformly
+        // with REST consumers — no direct service or model access.
+        $resp = $this->api()->get("/orders/{$this->orderId}");
+        if ($resp->status() === 403) {
             abort(403);
         }
+        if ($resp->failed()) {
+            abort($resp->status() ?: 500);
+        }
+        $order = $resp->json('data');
         return view('livewire.orders.order-show', ['order' => $order]);
     }
 }

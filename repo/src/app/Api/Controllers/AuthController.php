@@ -59,6 +59,19 @@ class AuthController extends Controller
     {
         $user = $request->attributes->get('auth_user');
 
+        // Effective permission slugs the UI can use to conditionally
+        // render buttons. Admin holds every defined permission
+        // implicitly; non-admins get whatever has been granted via
+        // role_permissions. The list is the SAME slug set the API
+        // middleware enforces, so the UI and the backend cannot
+        // disagree about who can do what.
+        $permRepo = app(\App\Domain\Contracts\PermissionRepositoryInterface::class);
+        if ($user->role === 'admin') {
+            $effective = \App\Domain\Models\Permission::pluck('slug')->all();
+        } else {
+            $effective = $permRepo->permissionsForRole($user->role)->all();
+        }
+
         return response()->json([
             'data' => [
                 'id'       => $user->id,
@@ -66,6 +79,7 @@ class AuthController extends Controller
                 'full_name' => $user->full_name,
                 'role'     => $user->role,
                 'is_active' => $user->is_active,
+                'effective_permissions' => $effective,
             ],
         ]);
     }

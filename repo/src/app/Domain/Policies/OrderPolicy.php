@@ -100,12 +100,31 @@ class OrderPolicy
 
     /**
      * Can the user process a refund?
-     * Staff+ with object access.
+     *
+     * Three independent gates, all of which must pass:
+     *   1. Role: staff+ with object access (admin, owner staff, attributed
+     *      group-leader staff).
+     *   2. Lifecycle state: refunds are only valid out of `cancelled` or
+     *      `completed`. Any other status (draft, pending, confirmed,
+     *      checked_in, checked_out, or already-refunded) is rejected with
+     *      403 — refunding a live reservation has no defined business
+     *      meaning and was previously a foot-gun.
+     *   3. Idempotency: if `refunded_at` is already set OR the order's
+     *      status is already `refunded`, the request is denied. The
+     *      controller wraps the refund in a row-locked transaction so
+     *      this check cannot race itself; the policy gate is the
+     *      defense-in-depth tier that produces a clean 403 instead of
+     *      a duplicate-row exception.
      */
+    public const REFUNDABLE_STATUSES = ['cancelled', 'completed'];
+
     public function refund(User $user, Order $order): bool
     {
         if (!$user->isAtLeast('staff')) return false;
-        return $this->canActOn($user, $order);
+        if (!$this->canActOn($user, $order)) return false;
+        if (!in_array($order->status, self::REFUNDABLE_STATUSES, true)) return false;
+        if ($order->refunded_at !== null) return false;
+        return true;
     }
 
     /**

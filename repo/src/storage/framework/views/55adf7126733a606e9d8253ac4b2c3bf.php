@@ -76,15 +76,23 @@
         <table class="w-full text-sm" role="table" aria-label="Commission cycles">
             <thead><tr class="border-b text-left text-surface-500 text-xs uppercase"><th class="px-4 py-3">Cycle</th><th class="px-4 py-3">Type</th><th class="px-4 py-3 text-right">Revenue</th><th class="px-4 py-3 text-right">Rate</th><th class="px-4 py-3 text-right">Commission</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Hold Until</th></tr></thead>
             <tbody>
-                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $commissions; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $c): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?>
+                <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $commissions; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $cRaw): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?>
+                <?php
+                    // CommissionReport now consumes the API JSON payload directly,
+                    // so each row may be either an array or an Eloquent model.
+                    $c = (object) (is_array($cRaw) ? $cRaw : (method_exists($cRaw, 'toArray') ? $cRaw->toArray() : (array) $cRaw));
+                    $cycleStart = !empty($c->cycle_start) ? \Carbon\Carbon::parse($c->cycle_start)->format('M d') : '';
+                    $cycleEnd = !empty($c->cycle_end) ? \Carbon\Carbon::parse($c->cycle_end)->format('M d') : '';
+                    $holdUntil = !empty($c->hold_until) ? \Carbon\Carbon::parse($c->hold_until)->format('M d, Y') : '—';
+                ?>
                 <tr class="border-b border-surface-100">
-                    <td class="px-4 py-3"><?php echo e($c->cycle_start->format('M d')); ?> – <?php echo e($c->cycle_end->format('M d')); ?></td>
-                    <td class="px-4 py-3"><?php echo e(ucfirst($c->cycle_type)); ?></td>
-                    <td class="px-4 py-3 text-right">$<?php echo e(number_format($c->attributed_revenue, 2)); ?></td>
-                    <td class="px-4 py-3 text-right"><?php echo e(number_format($c->commission_rate * 100, 1)); ?>%</td>
-                    <td class="px-4 py-3 text-right font-bold">$<?php echo e(number_format($c->commission_amount, 2)); ?></td>
-                    <td class="px-4 py-3"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <?php echo e($c->status === 'paid' ? 'bg-green-100 text-green-700' : ($c->status === 'held' ? 'bg-amber-100 text-amber-700' : 'bg-surface-100 text-surface-700')); ?>"><?php echo e(ucfirst($c->status)); ?></span></td>
-                    <td class="px-4 py-3 text-xs text-surface-500"><?php echo e($c->hold_until?->format('M d, Y') ?? '—'); ?></td>
+                    <td class="px-4 py-3"><?php echo e($cycleStart); ?> – <?php echo e($cycleEnd); ?></td>
+                    <td class="px-4 py-3"><?php echo e(ucfirst($c->cycle_type ?? '')); ?></td>
+                    <td class="px-4 py-3 text-right">$<?php echo e(number_format((float) ($c->attributed_revenue ?? 0), 2)); ?></td>
+                    <td class="px-4 py-3 text-right"><?php echo e(number_format(((float) ($c->commission_rate ?? 0)) * 100, 1)); ?>%</td>
+                    <td class="px-4 py-3 text-right font-bold">$<?php echo e(number_format((float) ($c->commission_amount ?? 0), 2)); ?></td>
+                    <td class="px-4 py-3"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium <?php echo e(($c->status ?? '') === 'paid' ? 'bg-green-100 text-green-700' : (($c->status ?? '') === 'held' ? 'bg-amber-100 text-amber-700' : 'bg-surface-100 text-surface-700')); ?>"><?php echo e(ucfirst($c->status ?? '')); ?></span></td>
+                    <td class="px-4 py-3 text-xs text-surface-500"><?php echo e($holdUntil); ?></td>
                 </tr>
                 <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?>
                 <tr><td colspan="7" class="px-4 py-8 text-center text-surface-500">No commissions for this period.</td></tr>
@@ -96,10 +104,14 @@
     
     <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
         <h2 class="text-lg font-semibold mb-4">Attributed Orders</h2>
-        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $attributedOrders; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $o): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?>
+        <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__empty_1 = true; $__currentLoopData = $attributedOrders; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $oRaw): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); $__empty_1 = false; ?>
+            <?php
+                $o = (object) (is_array($oRaw) ? $oRaw : (method_exists($oRaw, 'toArray') ? $oRaw->toArray() : (array) $oRaw));
+                $confirmed = !empty($o->confirmed_at) ? \Carbon\Carbon::parse($o->confirmed_at)->format('M d, H:i') : '';
+            ?>
             <div class="flex justify-between items-center py-2 border-b border-surface-100 last:border-0 text-sm">
-                <div><span class="font-medium"><?php echo e($o->order_number); ?></span> <span class="text-surface-500">— <?php echo e($o->confirmed_at?->format('M d, H:i')); ?></span></div>
-                <span class="font-medium">$<?php echo e(number_format($o->total, 2)); ?></span>
+                <div><span class="font-medium"><?php echo e($o->order_number ?? ''); ?></span> <span class="text-surface-500">— <?php echo e($confirmed); ?></span></div>
+                <span class="font-medium">$<?php echo e(number_format((float) ($o->total ?? 0), 2)); ?></span>
             </div>
         <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); if ($__empty_1): ?>
             <p class="text-surface-500 text-sm">No attributed orders in this period.</p>

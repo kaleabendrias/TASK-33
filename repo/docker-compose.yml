@@ -6,10 +6,15 @@
 # │  with a single `docker compose up`. No .env file is required —   │
 # │  no .env file is read.                                           │
 # │                                                                  │
+# │  Sensitive values (JWT key, pgAdmin credentials, DB password)    │
+# │  are sourced from HOST-INJECTED environment variables using      │
+# │  ${VAR:-default} substitution. In production, set those vars in  │
+# │  the host shell, systemd unit, K8s Secret, or Docker secret      │
+# │  driver — the throwaway defaults are only used when no override  │
+# │  is present so local dev still works with `docker compose up`.   │
+# │                                                                  │
 # │  ⚠ The defaults below are intentionally weak (publishable,       │
 # │  reproducible, throwaway) and MUST NOT be reused in production.  │
-# │  Production deployments should override every credential at the  │
-# │  orchestrator level (Compose env_file, Docker secrets, K8s, …).  │
 # └──────────────────────────────────────────────────────────────────┘
 
 services:
@@ -54,10 +59,19 @@ services:
       DB_PORT: "5432"
       DB_DATABASE: "service_platform"
       DB_USERNAME: "app_user"
-      DB_PASSWORD: "app_secret_pass"
+      # Host-injected: export DB_PASSWORD in your shell / orchestrator
+      # to override the throwaway dev default.
+      DB_PASSWORD: "${DB_PASSWORD:-app_secret_pass}"
       # ── Auth ───────────────────────────────────────────────────────
-      # 32-byte HS256 dev secret — override in real deployments.
-      JWT_SECRET: "Rz8pV3mX7qKjL2wY9sN6dF4hA1cT5gU0"
+      # Host-injected: 32-byte HS256 secret. Production MUST override
+      # via host env, Docker secret, or orchestrator secret driver.
+      JWT_SECRET: "${JWT_SECRET:-Rz8pV3mX7qKjL2wY9sN6dF4hA1cT5gU0}"
+      # JWT session policy — tunable without code changes. Defaults
+      # mirror the historical hard-coded policy (30m access TTL,
+      # 7-day refresh window, 2 concurrent sessions).
+      JWT_ACCESS_TTL: "30"
+      JWT_REFRESH_TTL: "10080"
+      JWT_MAX_SESSIONS: "2"
       # ── Runtime ────────────────────────────────────────────────────
       CACHE_STORE: "file"
       SESSION_DRIVER: "file"
@@ -82,7 +96,8 @@ services:
     environment:
       POSTGRES_DB: "service_platform"
       POSTGRES_USER: "app_user"
-      POSTGRES_PASSWORD: "app_secret_pass"
+      # Host-injected — keep in sync with the app's DB_PASSWORD.
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-app_secret_pass}"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -99,8 +114,12 @@ services:
     ports:
       - "5050:80"
     environment:
-      PGADMIN_DEFAULT_EMAIL: "admin@local.dev"
-      PGADMIN_DEFAULT_PASSWORD: "admin"
+      # Host-injected: override via PGADMIN_EMAIL / PGADMIN_PASSWORD
+      # in your shell, systemd EnvironmentFile, or orchestrator
+      # secret driver. The defaults are dev-only and MUST NOT be
+      # used in any reachable environment.
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@local.dev}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:-admin}"
       PGADMIN_CONFIG_SERVER_MODE: "False"
     depends_on:
       postgres:

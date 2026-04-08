@@ -9,8 +9,15 @@ if [ ! -f vendor/autoload.php ]; then
     composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
 fi
 
-# Ensure storage directories exist with correct permissions
-mkdir -p storage/framework/{cache/data,sessions,views} storage/logs bootstrap/cache
+# Ensure storage directories exist with correct permissions. These are
+# intentionally NOT shipped in the build context (see .dockerignore)
+# so the entrypoint is the single source of truth for the runtime tree.
+mkdir -p storage/framework/cache/data \
+         storage/framework/sessions \
+         storage/framework/views \
+         storage/logs \
+         storage/app/attachments \
+         bootstrap/cache
 chown -R www-data:www-data storage bootstrap/cache
 
 # Wait for database to be truly ready

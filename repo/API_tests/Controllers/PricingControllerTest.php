@@ -2,10 +2,8 @@
 
 namespace ApiTests\Controllers;
 
-use App\Domain\Models\Permission;
 use App\Domain\Models\PricingBaseline;
 use App\Domain\Models\Role;
-use App\Domain\Models\RolePermission;
 use App\Domain\Models\ServiceArea;
 use ApiTests\TestCase;
 
@@ -19,10 +17,8 @@ class PricingControllerTest extends TestCase
         parent::setUp();
         $this->sa = ServiceArea::create(['name' => 'PriceSA', 'slug' => 'price-sa']);
         $this->role = Role::create(['name' => 'PriceRole', 'slug' => 'price-role', 'level' => 1]);
-        foreach (['pricing-baselines.create', 'pricing-baselines.update'] as $slug) {
-            $p = Permission::firstOrCreate(['slug' => $slug]);
-            RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-        }
+        // No permission seeding: foundational entity writes are
+        // strictly admin-only.
     }
 
     public function test_index(): void
@@ -41,22 +37,46 @@ class PricingControllerTest extends TestCase
             ->assertOk()->assertJsonFragment(['hourly_rate' => 75.0]);
     }
 
-    public function test_store(): void
+    public function test_admin_can_store(): void
     {
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $this->postJson('/api/pricing-baselines', [
             'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
             'hourly_rate' => 100, 'effective_from' => '2026-01-01',
-        ], $this->authHeaders($staff))->assertStatus(201);
+        ], $this->authHeaders($admin))->assertStatus(201);
     }
 
-    public function test_update(): void
+    public function test_admin_can_update(): void
     {
-        $perm = Permission::firstOrCreate(['slug' => 'pricing-baselines.update']);
-        RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $perm->id]);
         $pb = PricingBaseline::create(['service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'hourly_rate' => 50, 'effective_from' => '2025-01-01']);
-        $staff = $this->createStaffWithProfile();
-        $this->putJson("/api/pricing-baselines/{$pb->id}", ['hourly_rate' => 80], $this->authHeaders($staff))
+        $admin = $this->createUser('admin');
+        $this->putJson("/api/pricing-baselines/{$pb->id}", ['hourly_rate' => 80], $this->authHeaders($admin))
             ->assertOk();
+    }
+
+    public function test_staff_cannot_store(): void
+    {
+        $staff = $this->createStaffWithProfile('staff');
+        $this->postJson('/api/pricing-baselines', [
+            'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
+            'hourly_rate' => 100, 'effective_from' => '2026-01-01',
+        ], $this->authHeaders($staff))->assertStatus(403);
+    }
+
+    public function test_group_leader_cannot_store(): void
+    {
+        $leader = $this->createStaffWithProfile('group-leader');
+        $this->postJson('/api/pricing-baselines', [
+            'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
+            'hourly_rate' => 100, 'effective_from' => '2026-01-01',
+        ], $this->authHeaders($leader))->assertStatus(403);
+    }
+
+    public function test_staff_cannot_update(): void
+    {
+        $pb = PricingBaseline::create(['service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'hourly_rate' => 50, 'effective_from' => '2025-01-01']);
+        $staff = $this->createStaffWithProfile('staff');
+        $this->putJson("/api/pricing-baselines/{$pb->id}", ['hourly_rate' => 80], $this->authHeaders($staff))
+            ->assertStatus(403);
     }
 }

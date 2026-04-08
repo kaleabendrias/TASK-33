@@ -14,6 +14,22 @@ class JwtAuthenticate
 
     public function handle(Request $request, Closure $next): Response
     {
+        // In-process sub-request short-circuit. When the Livewire layer
+        // dispatches an internal API call via UsesApiClient, it pre-stamps
+        // `auth_user` on the request attributes. There is no JWT to
+        // validate (the user is already authenticated upstream by
+        // WebSessionAuth) so we accept the pre-stamped identity. This
+        // is safe because only in-process code can write to the request
+        // attributes — external HTTP clients cannot forge them.
+        if ($request->attributes->get('auth_user') instanceof User) {
+            $user = $request->attributes->get('auth_user');
+            if (!$user->is_active) {
+                return response()->json(['message' => 'Authentication required.'], 401);
+            }
+            app('auth')->setUser($user);
+            return $next($request);
+        }
+
         $header = $request->header('Authorization', '');
 
         if (!str_starts_with($header, 'Bearer ')) {

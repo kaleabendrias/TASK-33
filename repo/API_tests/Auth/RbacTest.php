@@ -2,8 +2,6 @@
 
 namespace ApiTests\Auth;
 
-use App\Domain\Models\Permission;
-use App\Domain\Models\RolePermission;
 use App\Domain\Models\ServiceArea;
 use ApiTests\TestCase;
 
@@ -13,16 +11,9 @@ class RbacTest extends TestCase
     {
         parent::setUp();
         ServiceArea::create(['name' => 'RBAC Test', 'slug' => 'rbac-test']);
-        // Create permissions
-        $perms = ['service-areas.create', 'service-areas.update', 'resources.create', 'resources.update', 'resources.transition', 'pricing-baselines.create', 'pricing-baselines.update', 'roles.create', 'roles.update'];
-        foreach ($perms as $slug) {
-            $p = Permission::firstOrCreate(['slug' => $slug]);
-            // Staff gets resource perms, GL gets all
-            if (str_starts_with($slug, 'resources.') || str_starts_with($slug, 'pricing')) {
-                RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-            }
-            RolePermission::firstOrCreate(['role' => 'group-leader', 'permission_id' => $p->id]);
-        }
+        // No permission seeding: foundational entity writes are
+        // strictly admin-only and cannot be unlocked via the rolewise
+        // permission table.
     }
 
     // --- Role hierarchy ---
@@ -39,16 +30,18 @@ class RbacTest extends TestCase
         $this->postJson('/api/service-areas', ['name' => 'X'], $this->authHeaders($user))->assertStatus(403);
     }
 
-    public function test_staff_cannot_create_service_area_without_permission(): void
+    public function test_staff_cannot_create_service_area(): void
     {
-        $staff = $this->createUser('staff');
+        $staff = $this->createStaffWithProfile('staff');
         $this->postJson('/api/service-areas', ['name' => 'X'], $this->authHeaders($staff))->assertStatus(403);
     }
 
-    public function test_group_leader_can_create_service_area(): void
+    public function test_group_leader_cannot_create_service_area(): void
     {
+        // Foundational entity writes are admin-only — group leaders are
+        // explicitly forbidden, regardless of profile completeness.
         $gl = $this->createStaffWithProfile('group-leader');
-        $this->postJson('/api/service-areas', ['name' => 'New Area'], $this->authHeaders($gl))->assertStatus(201);
+        $this->postJson('/api/service-areas', ['name' => 'New Area'], $this->authHeaders($gl))->assertStatus(403);
     }
 
     public function test_admin_can_access_everything(): void
@@ -62,14 +55,25 @@ class RbacTest extends TestCase
 
     // --- Permission-level checks ---
 
-    public function test_staff_can_create_resource(): void
+    public function test_staff_cannot_create_resource(): void
     {
+        // Resource creation is a foundational write — admin-only.
         $staff = $this->createStaffWithProfile();
         $sa = ServiceArea::first();
         $role = \App\Domain\Models\Role::create(['name' => 'Dev', 'slug' => 'dev-' . mt_rand(), 'level' => 1]);
         $this->postJson('/api/resources', [
             'name' => 'Staff Resource', 'service_area_id' => $sa->id, 'role_id' => $role->id,
-        ], $this->authHeaders($staff))->assertStatus(201);
+        ], $this->authHeaders($staff))->assertStatus(403);
+    }
+
+    public function test_admin_can_create_resource(): void
+    {
+        $admin = $this->createUser('admin');
+        $sa = ServiceArea::first();
+        $role = \App\Domain\Models\Role::create(['name' => 'AdminDev', 'slug' => 'admin-dev-' . mt_rand(), 'level' => 1]);
+        $this->postJson('/api/resources', [
+            'name' => 'Admin Resource', 'service_area_id' => $sa->id, 'role_id' => $role->id,
+        ], $this->authHeaders($admin))->assertStatus(201);
     }
 
     public function test_user_cannot_access_admin_routes(): void

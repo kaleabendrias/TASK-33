@@ -5,7 +5,7 @@
         <input wire:model.live.debounce.300ms="search" type="search" placeholder="Search by order #…" class="flex-1 rounded-lg border-surface-200 text-sm" aria-label="Search orders"/>
         <select wire:model.live="statusFilter" class="rounded-lg border-surface-200 text-sm w-full sm:w-48" aria-label="Filter by status">
             <option value="">All Statuses</option>
-            @foreach(['draft','confirmed','checked_in','checked_out','completed','cancelled','refunded'] as $s)
+            @foreach(['draft','pending','confirmed','checked_in','checked_out','completed','cancelled','refunded'] as $s)
                 <option value="{{ $s }}">{{ ucfirst(str_replace('_',' ',$s)) }}</option>
             @endforeach
         </select>

@@ -2,8 +2,8 @@
 
 namespace App\Livewire\Settlement;
 
-use App\Application\Services\SettlementService;
 use App\Livewire\Concerns\UsesApiClient;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -24,6 +24,14 @@ class SettlementIndex extends Component
     {
         $this->periodStart = now()->startOfMonth()->toDateString();
         $this->periodEnd = now()->toDateString();
+
+        // Authorize at mount so abort(403) propagates as a hard 403
+        // through Livewire's render harness. Doing the gate inside
+        // render() lets Livewire wrap the HTTP exception in a soft
+        // 200, which masks the denial in test assertions.
+        $resp = $this->api()->get('/settlements');
+        if ($resp->status() === 401) abort(401);
+        if ($resp->status() === 403) abort(403);
     }
 
     public function generate(): void
@@ -50,18 +58,35 @@ class SettlementIndex extends Component
         $this->message = "Settlement {$data['reference']} finalized.";
     }
 
-    public function render(SettlementService $settlements)
+    public function render()
     {
-        $user = auth()->user() ?? request()->attributes->get('auth_user');
-        if (!$user) abort(401);
-        // Settlement summaries are now visible to staff, group-leader, and admin.
-        // Row-level scoping happens inside SettlementService::listSettlementsForUser.
-        if (!in_array($user->role, ['staff', 'group-leader', 'admin'], true)) {
-            abort(403);
-        }
+        // Read through the API so authorization, role gating, and
+        // row-level scoping are enforced uniformly with REST clients.
+        // The /settlements endpoint is gated to role:staff (staff,
+        // group-leader, and admin) by the API middleware and applies
+        // row-level scoping inside SettlementService — Livewire never
+        // touches the service or models directly.
+        $resp = $this->api()->get('/settlements');
+        if ($resp->status() === 401) abort(401);
+        if ($resp->status() === 403) abort(403);
+        $payload = $resp->successful() ? ($resp->json() ?? []) : [];
+
+        // Re-hydrate as a paginator so the existing Blade view
+        // (which iterates with `->items()`) keeps working without
+        // changes.
+        $settlements = new LengthAwarePaginator(
+            items: $payload['data'] ?? [],
+            total: $payload['total'] ?? 0,
+            perPage: $payload['per_page'] ?? 10,
+            currentPage: $payload['current_page'] ?? 1,
+            options: ['path' => request()->url()],
+        );
 
         return view('livewire.settlement.settlement-index', [
-            'settlements' => $settlements->listSettlementsForUser($user),
+            'settlements' => $settlements,
+            // Effective permissions are passed in so the blade can
+            // gate buttons by the SAME slug the API enforces.
+            'effectivePermissions' => $this->effectivePermissions(),
         ]);
     }
 }

@@ -14,6 +14,7 @@ use App\Api\Controllers\SettlementApiController;
 use App\Api\Controllers\ExportApiController;
 use App\Api\Controllers\AttachmentController;
 use App\Api\Controllers\StaffProfileApiController;
+use App\Api\Controllers\DashboardApiController;
 
 /*
 |--------------------------------------------------------------------------
@@ -43,6 +44,9 @@ Route::middleware('jwt.auth')->group(function () {
     Route::get('/profile', [StaffProfileApiController::class, 'show']);
     Route::put('/profile', [StaffProfileApiController::class, 'update']);
 
+    // Dashboard summary (any authenticated caller; service applies role gating)
+    Route::get('/dashboard/stats', [DashboardApiController::class, 'stats']);
+
     // ── Read endpoints (any authenticated user) ─────────────────────
 
     Route::apiResource('service-areas', ServiceAreaController::class)->only(['index', 'show']);
@@ -70,19 +74,10 @@ Route::middleware('jwt.auth')->group(function () {
     // Exports (scoped by user in controller)
     Route::post('/exports', [ExportApiController::class, 'export']);
 
-    // ── Staff+ administrative write operations ──────────────────────
-
+    // ── Staff+ operational write surface ────────────────────────────
+    // Limited to operational concerns (attachments). Foundational
+    // entity writes are admin-only — see the admin block below.
     Route::middleware(['role:staff', 'profile.complete'])->group(function () {
-        Route::post('/service-areas', [ServiceAreaController::class, 'store'])->middleware('permission:service-areas.create');
-        Route::put('/service-areas/{service_area}', [ServiceAreaController::class, 'update'])->middleware('permission:service-areas.update');
-        Route::post('/roles', [RoleController::class, 'store'])->middleware('permission:roles.create');
-        Route::put('/roles/{role}', [RoleController::class, 'update'])->middleware('permission:roles.update');
-        Route::post('/resources', [ResourceController::class, 'store'])->middleware('permission:resources.create');
-        Route::put('/resources/{resource}', [ResourceController::class, 'update'])->middleware('permission:resources.update');
-        Route::post('/resources/{resource}/transition', [ResourceController::class, 'transition'])->middleware('permission:resources.transition');
-        Route::post('/pricing-baselines', [PricingBaselineController::class, 'store'])->middleware('permission:pricing-baselines.create');
-        Route::put('/pricing-baselines/{pricing_baseline}', [PricingBaselineController::class, 'update'])->middleware('permission:pricing-baselines.update');
-
         // Attachment upload
         Route::post('/attachments', [AttachmentController::class, 'upload']);
     });
@@ -99,9 +94,42 @@ Route::middleware('jwt.auth')->group(function () {
         Route::get('/settlements', [SettlementApiController::class, 'index']);
         Route::get('/settlements/{id}', [SettlementApiController::class, 'show']);
         Route::get('/commissions', [SettlementApiController::class, 'commissions']);
+        Route::get('/commissions/attributed-orders', [SettlementApiController::class, 'attributedOrders']);
     });
 
     // ── Admin-only ──────────────────────────────────────────────────
+
+    // ── Foundational entity writes (admin-only, no /admin prefix) ───
+    // These mutate billing- and operations-critical baselines and must
+    // never be available to staff or group-leaders, per requirements.
+    //
+    // Each route also carries a `permission:*` slug. The role:admin
+    // gate is the hard role boundary; the permission slug is the
+    // feature-level identifier the UI introspects so individual
+    // buttons can be conditionally rendered (see GET /auth/me's
+    // `effective_permissions` field). Admin holds every permission
+    // implicitly (see EloquentPermissionRepository::roleHasPermission)
+    // so this composes cleanly without per-admin seeding.
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/service-areas', [ServiceAreaController::class, 'store'])
+            ->middleware('permission:service-areas.create');
+        Route::put('/service-areas/{service_area}', [ServiceAreaController::class, 'update'])
+            ->middleware('permission:service-areas.update');
+        Route::post('/roles', [RoleController::class, 'store'])
+            ->middleware('permission:roles.create');
+        Route::put('/roles/{role}', [RoleController::class, 'update'])
+            ->middleware('permission:roles.update');
+        Route::post('/resources', [ResourceController::class, 'store'])
+            ->middleware('permission:resources.create');
+        Route::put('/resources/{resource}', [ResourceController::class, 'update'])
+            ->middleware('permission:resources.update');
+        Route::post('/resources/{resource}/transition', [ResourceController::class, 'transition'])
+            ->middleware('permission:resources.transition');
+        Route::post('/pricing-baselines', [PricingBaselineController::class, 'store'])
+            ->middleware('permission:pricing-baselines.create');
+        Route::put('/pricing-baselines/{pricing_baseline}', [PricingBaselineController::class, 'update'])
+            ->middleware('permission:pricing-baselines.update');
+    });
 
     Route::middleware('role:admin')->prefix('admin')->group(function () {
         Route::get('/users', [AdminController::class, 'listUsers']);

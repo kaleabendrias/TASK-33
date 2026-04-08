@@ -2,9 +2,7 @@
 
 namespace ApiTests\Controllers;
 
-use App\Domain\Models\Permission;
 use App\Domain\Models\Role;
-use App\Domain\Models\RolePermission;
 use ApiTests\TestCase;
 
 class RoleControllerTest extends TestCase
@@ -13,10 +11,8 @@ class RoleControllerTest extends TestCase
     {
         parent::setUp();
         Role::create(['name' => 'TestRole', 'slug' => 'test-role', 'level' => 1]);
-        foreach (['roles.create', 'roles.update'] as $slug) {
-            $p = Permission::firstOrCreate(['slug' => $slug]);
-            RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-        }
+        // No permission seeding: foundational entity writes are
+        // strictly admin-only.
     }
 
     public function test_index(): void
@@ -34,18 +30,47 @@ class RoleControllerTest extends TestCase
             ->assertJsonPath('data.name', 'TestRole');
     }
 
-    public function test_store(): void
+    public function test_admin_can_store(): void
     {
-        $staff = $this->createStaffWithProfile();
-        $this->postJson('/api/roles', ['name' => 'NewRole'], $this->authHeaders($staff))
+        $admin = $this->createUser('admin');
+        $this->postJson('/api/roles', ['name' => 'NewRole'], $this->authHeaders($admin))
             ->assertStatus(201);
     }
 
-    public function test_update(): void
+    public function test_admin_can_update(): void
     {
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $role = Role::first();
-        $this->putJson("/api/roles/{$role->id}", ['name' => 'Renamed'], $this->authHeaders($staff))
+        $this->putJson("/api/roles/{$role->id}", ['name' => 'Renamed'], $this->authHeaders($admin))
             ->assertOk()->assertJsonPath('data.name', 'Renamed');
+    }
+
+    public function test_staff_cannot_store(): void
+    {
+        $staff = $this->createStaffWithProfile('staff');
+        $this->postJson('/api/roles', ['name' => 'X'], $this->authHeaders($staff))
+            ->assertStatus(403);
+    }
+
+    public function test_group_leader_cannot_store(): void
+    {
+        $leader = $this->createStaffWithProfile('group-leader');
+        $this->postJson('/api/roles', ['name' => 'X'], $this->authHeaders($leader))
+            ->assertStatus(403);
+    }
+
+    public function test_user_cannot_store(): void
+    {
+        $user = $this->createUser('user');
+        $this->postJson('/api/roles', ['name' => 'X'], $this->authHeaders($user))
+            ->assertStatus(403);
+    }
+
+    public function test_staff_cannot_update(): void
+    {
+        $staff = $this->createStaffWithProfile('staff');
+        $role = Role::first();
+        $this->putJson("/api/roles/{$role->id}", ['name' => 'X'], $this->authHeaders($staff))
+            ->assertStatus(403);
     }
 }

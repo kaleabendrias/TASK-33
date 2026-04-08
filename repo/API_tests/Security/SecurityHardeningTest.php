@@ -62,27 +62,24 @@ class SecurityHardeningTest extends TestCase
         $this->assertStringContainsString("env('APP_DEBUG', false)", $configFile);
     }
 
-    // --- Profile completion gate on API ---
+    // --- Foundational entity writes are admin-only ---
 
-    public function test_profile_gate_blocks_staff_admin_actions_without_profile(): void
+    public function test_staff_blocked_from_foundational_writes_without_profile(): void
     {
         $staff = $this->createUser('staff');
-        $p = \App\Domain\Models\Permission::firstOrCreate(['slug' => 'service-areas.create']);
-        \App\Domain\Models\RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-
-        // Staff without profile cannot create service areas (admin write op)
         $this->postJson('/api/service-areas', ['name' => 'Blocked'], $this->authHeaders($staff))
             ->assertStatus(403);
     }
 
-    public function test_profile_gate_allows_staff_admin_actions_with_profile(): void
+    public function test_staff_blocked_from_foundational_writes_with_profile(): void
     {
+        // Profile completeness must NOT unlock foundational entity
+        // writes — only the admin role does. This guards against the
+        // historical bug where seeding staff permissions silently
+        // re-enabled billing-baseline mutation.
         $staff = $this->createStaffWithProfile();
-        $p = \App\Domain\Models\Permission::firstOrCreate(['slug' => 'service-areas.create']);
-        \App\Domain\Models\RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-
-        $this->postJson('/api/service-areas', ['name' => 'Allowed'], $this->authHeaders($staff))
-            ->assertStatus(201);
+        $this->postJson('/api/service-areas', ['name' => 'StillBlocked'], $this->authHeaders($staff))
+            ->assertStatus(403);
     }
 
     // --- Must-change-password flag ---

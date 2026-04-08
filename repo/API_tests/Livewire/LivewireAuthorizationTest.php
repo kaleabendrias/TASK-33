@@ -100,16 +100,16 @@ class LivewireAuthorizationTest extends TestCase
 
     public function test_order_index_isolates_by_user(): void
     {
-        // OrderIndex is now API-decoupled — fake the API response directly.
-        // Tenant isolation is exercised end-to-end by OrderApiTest::test_owner_can_view_order
-        // and IdorAndIsolationTest::test_regular_user_cannot_cancel_other_users_order;
-        // here we just verify the Livewire component renders the API payload.
+        // OrderIndex now goes through the in-process API layer; the
+        // /orders endpoint applies tenant isolation server-side. We
+        // create a real order owned by $u1 and assert the component
+        // surfaces it. End-to-end tenant isolation (other users CAN'T
+        // see this row) is exercised by OrderApiTest and the IDOR
+        // suite — here we only assert the component proxies correctly.
         $u1 = $this->createUser('user');
+        $this->makeOrder($u1, status: 'draft');
         $this->actAs($u1);
-        Http::fake(['*/orders*' => Http::response([
-            'data' => [['id' => 1, 'user_id' => $u1->id, 'order_number' => 'ORD-1', 'status' => 'draft']],
-            'total' => 1, 'current_page' => 1, 'last_page' => 1, 'per_page' => 15,
-        ], 200)]);
+
         $component = Livewire::test(OrderIndex::class);
         $orders = $component->viewData('orders');
         $this->assertEquals(1, $orders->total());
@@ -118,14 +118,12 @@ class LivewireAuthorizationTest extends TestCase
     public function test_order_index_admin_sees_all(): void
     {
         $admin = $this->createUser('admin');
+        $u1 = $this->createUser('user');
+        $u2 = $this->createUser('user');
+        $this->makeOrder($u1, status: 'draft');
+        $this->makeOrder($u2, status: 'draft');
         $this->actAs($admin);
-        Http::fake(['*/orders*' => Http::response([
-            'data' => [
-                ['id' => 1, 'user_id' => 1, 'order_number' => 'ORD-A', 'status' => 'draft'],
-                ['id' => 2, 'user_id' => 2, 'order_number' => 'ORD-B', 'status' => 'draft'],
-            ],
-            'total' => 2, 'current_page' => 1, 'last_page' => 1, 'per_page' => 15,
-        ], 200)]);
+
         $component = Livewire::test(OrderIndex::class);
         $orders = $component->viewData('orders');
         $this->assertGreaterThanOrEqual(2, $orders->total());
@@ -203,7 +201,11 @@ class LivewireAuthorizationTest extends TestCase
 
         $this->actAs($gl1);
         $component = Livewire::test(SettlementIndex::class);
-        $refs = collect($component->viewData('settlements')->items())->pluck('reference')->all();
+        // Items are plain associative arrays from the API JSON; the
+        // settlement belonging to gl2 must NOT appear in gl1's view.
+        $refs = collect($component->viewData('settlements')->items())
+            ->pluck('reference')
+            ->all();
         $this->assertNotContains('STL-LV2', $refs);
     }
 
@@ -211,18 +213,20 @@ class LivewireAuthorizationTest extends TestCase
 
     public function test_booking_index_authenticated_user_sees_active_items(): void
     {
-        // BookingIndex is API-decoupled. Active-only filtering happens
-        // server-side in BookingApiController::items; we fake the response
-        // here and assert the component proxies it through to the view.
+        // BookingIndex routes through the real /bookings/items endpoint;
+        // active-only filtering is enforced server-side. Create a real
+        // visible row and assert it's surfaced through the component.
+        BookableItem::create([
+            'type' => 'room', 'name' => 'LV-Visible',
+            'hourly_rate' => 30, 'daily_rate' => 100, 'tax_rate' => 0.1,
+            'capacity' => 5, 'is_active' => true,
+        ]);
         $u = $this->createUser('user');
         $this->actAs($u);
-        Http::fake(['*/bookings/items*' => Http::response([
-            'data' => [['id' => 1, 'name' => 'LV-Visible', 'is_active' => true]],
-            'total' => 1, 'current_page' => 1, 'last_page' => 1, 'per_page' => 12,
-        ], 200)]);
+
         $component = Livewire::test(BookingIndex::class);
         $items = collect($component->viewData('items')->items());
-        $this->assertEquals(1, $items->count());
-        $this->assertEquals('LV-Visible', $items->first()['name']);
+        $this->assertGreaterThanOrEqual(1, $items->count());
+        $this->assertContains('LV-Visible', $items->pluck('name')->all());
     }
 }

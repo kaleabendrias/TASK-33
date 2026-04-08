@@ -41,7 +41,7 @@ Route::post('/logout', function () {
                 $jti = is_array($payload) ? ($payload['jti'] ?? null) : null;
             }
         } catch (\Throwable $e) {
-            Log::warning('logout.jwt_decode_failed', [
+            Log::channel('security')->warning('logout.jwt_decode_failed', [
                 'user_id' => $userId,
                 'reason'  => $e->getMessage(),
             ]);
@@ -55,7 +55,7 @@ Route::post('/logout', function () {
                 // down a stuck session in production. We still flush the
                 // session so the user perceives a successful logout, but the
                 // operations team can audit and force-revoke later.
-                Log::error('logout.jwt_revoke_failed', [
+                Log::channel('errors')->error('logout.jwt_revoke_failed', [
                     'user_id' => $userId,
                     'jti'     => $jti,
                     'reason'  => $e->getMessage(),
@@ -63,7 +63,7 @@ Route::post('/logout', function () {
                 ]);
             }
         } else {
-            Log::warning('logout.jwt_jti_missing', [
+            Log::channel('security')->warning('logout.jwt_jti_missing', [
                 'user_id' => $userId,
                 'token_segments' => isset($segments) ? count($segments) : 0,
             ]);

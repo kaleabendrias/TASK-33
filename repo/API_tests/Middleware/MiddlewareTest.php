@@ -2,10 +2,7 @@
 
 namespace ApiTests\Middleware;
 
-use App\Domain\Models\Permission;
-use App\Domain\Models\RolePermission;
 use App\Domain\Models\ServiceArea;
-use App\Domain\Models\StaffProfile;
 use ApiTests\TestCase;
 
 class MiddlewareTest extends TestCase
@@ -27,38 +24,36 @@ class MiddlewareTest extends TestCase
         $this->getJson('/api/service-areas', ['Accept' => 'application/json'])->assertStatus(401);
     }
 
-    public function test_role_middleware_user_vs_staff_endpoints(): void
+    public function test_role_middleware_blocks_user_from_admin_writes(): void
     {
         $user = $this->createUser('user');
-        // Service areas POST requires staff+
+        // Service areas POST is admin-only.
         $this->postJson('/api/service-areas', ['name' => 'Test'], $this->authHeaders($user))
             ->assertStatus(403);
     }
 
-    public function test_role_middleware_allows_higher_role(): void
+    public function test_role_middleware_admin_can_write_foundational_entities(): void
     {
         $admin = $this->createUser('admin');
         ServiceArea::create(['name' => 'Pre', 'slug' => 'pre']);
-        // Admin can access staff routes
         $this->postJson('/api/service-areas', ['name' => 'Admin Created'], $this->authHeaders($admin))
             ->assertStatus(201);
     }
 
-    public function test_permission_middleware_denies_without_permission(): void
+    public function test_role_middleware_blocks_staff_from_foundational_writes(): void
     {
-        $staff = $this->createUser('staff');
-        // No permissions seeded, so staff can't create service-areas
+        // Staff are blocked unconditionally — there is no permission row
+        // that can unlock foundational entity writes for them.
+        $staff = $this->createStaffWithProfile('staff');
         $this->postJson('/api/service-areas', ['name' => 'Denied'], $this->authHeaders($staff))
             ->assertStatus(403);
     }
 
-    public function test_permission_middleware_grants_with_permission(): void
+    public function test_role_middleware_blocks_group_leader_from_foundational_writes(): void
     {
-        $p = Permission::firstOrCreate(['slug' => 'service-areas.create']);
-        RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-        $staff = $this->createStaffWithProfile();
-        $this->postJson('/api/service-areas', ['name' => 'Granted'], $this->authHeaders($staff))
-            ->assertStatus(201);
+        $leader = $this->createStaffWithProfile('group-leader');
+        $this->postJson('/api/service-areas', ['name' => 'Denied'], $this->authHeaders($leader))
+            ->assertStatus(403);
     }
 
     public function test_disabled_user_rejected_after_auth(): void

@@ -87,6 +87,41 @@ class SettlementApiController extends Controller
             $request->query('from'),
             $request->query('to'),
         );
+
+        // Aggregated totals computed server-side so the Livewire UI never
+        // has to re-sum the rows itself — keeping the displayed numbers
+        // identical to anything else (CSV exports, dashboard cards) that
+        // consumes this endpoint.
+        $totals = [
+            'revenue'    => (float) $rows->sum('attributed_revenue'),
+            'commission' => (float) $rows->sum('commission_amount'),
+            'orders'     => (int) $rows->sum('order_count'),
+        ];
+
+        return response()->json([
+            'data'   => $rows,
+            'total'  => $rows->count(),
+            'totals' => $totals,
+        ]);
+    }
+
+    /**
+     * Orders attributed to the authenticated group leader inside an
+     * optional date window. Centralised here so the Livewire commission
+     * report can stay strictly API-decoupled — no direct service
+     * injection from the UI layer.
+     */
+    public function attributedOrders(Request $request): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (!$user->isAdmin() && $user->role !== 'group-leader') {
+            return response()->json(['message' => 'Forbidden.'], 403);
+        }
+        $rows = $this->service->listAttributedOrdersForLeader(
+            $user,
+            $request->query('from'),
+            $request->query('to'),
+        );
         return response()->json(['data' => $rows, 'total' => $rows->count()]);
     }
 }

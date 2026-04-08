@@ -29,8 +29,9 @@
                 <label for="item-select" class="block text-sm font-medium text-surface-700 mb-1">Item</label>
                 <select wire:model.live="selectedItemId" id="item-select" class="w-full rounded-lg border-surface-200 text-sm" aria-label="Select bookable item">
                     <option value="">Choose…</option>
+                    {{-- $items is the JSON array returned by GET /api/bookings/items --}}
                     @foreach($items as $item)
-                        <option value="{{ $item->id }}">{{ $item->name }} ({{ ucfirst($item->type) }})</option>
+                        <option value="{{ $item['id'] ?? '' }}">{{ $item['name'] ?? '' }} ({{ ucfirst($item['type'] ?? '') }})</option>
                     @endforeach
                 </select>
             </div>

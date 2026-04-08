@@ -29,7 +29,7 @@ class AttachmentController extends Controller
         // 1) Whitelist attachable_type — reject unknown classes outright.
         $fqcn = AttachmentPolicy::canonicalAttachableType($request->input('attachable_type'));
         if ($fqcn === null) {
-            Log::warning('attachment.upload.rejected_type', [
+            Log::channel('security')->warning('attachment.upload.rejected_type', [
                 'user_id' => $user?->id,
                 'attempted_type' => $request->input('attachable_type'),
             ]);
@@ -44,7 +44,7 @@ class AttachmentController extends Controller
 
         // 3) Object-level authorization — must be allowed to attach to THIS entity.
         if (!AttachmentPolicy::canAttachTo($user, $entity)) {
-            Log::warning('attachment.upload.denied', [
+            Log::channel('security')->warning('attachment.upload.denied', [
                 'user_id' => $user->id,
                 'attachable_type' => $fqcn,
                 'attachable_id' => $entity->id,

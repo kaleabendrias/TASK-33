@@ -8,16 +8,16 @@
         <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
             <h2 class="text-lg font-semibold mb-4">Account</h2>
             <dl class="space-y-3 text-sm">
-                <div class="flex justify-between"><dt class="text-surface-500">Username</dt><dd class="font-medium">{{ $user->username }}</dd></div>
-                <div class="flex justify-between"><dt class="text-surface-500">Full Name</dt><dd class="font-medium">{{ $user->full_name }}</dd></div>
-                <div class="flex justify-between"><dt class="text-surface-500">Role</dt><dd><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-100 text-brand-800">{{ ucfirst($user->role) }}</span></dd></div>
+                <div class="flex justify-between"><dt class="text-surface-500">Username</dt><dd class="font-medium">{{ $user['username'] ?? '' }}</dd></div>
+                <div class="flex justify-between"><dt class="text-surface-500">Full Name</dt><dd class="font-medium">{{ $user['full_name'] ?? '' }}</dd></div>
+                <div class="flex justify-between"><dt class="text-surface-500">Role</dt><dd><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-brand-100 text-brand-800">{{ ucfirst($user['role'] ?? '') }}</span></dd></div>
             </dl>
         </div>
 
         {{-- Editable profile --}}
         <div class="bg-white rounded-xl shadow-sm border border-surface-200 p-6">
             <h2 class="text-lg font-semibold mb-4">Staff Details</h2>
-            @if(!$profile || !$profile->isComplete())
+            @if(!$isComplete)
                 <div class="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-amber-800 text-sm" role="alert">
                     <x-icon name="exclamation-triangle" class="w-4 h-4 inline -mt-0.5 mr-1"/>
                     Complete all fields to unlock check-in/check-out and order approval.

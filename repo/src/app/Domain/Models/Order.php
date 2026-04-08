@@ -16,6 +16,7 @@ class Order extends Model
         'status', 'subtotal', 'tax_amount', 'discount_amount', 'total',
         'coupon_id', 'confirmed_at', 'checked_in_at', 'checked_out_at',
         'cancelled_at', 'cancellation_reason', 'staff_marked_unavailable', 'notes',
+        'refunded_at',
     ];
 
     protected array $trackedFields = ['status', 'total', 'staff_marked_unavailable'];
@@ -31,6 +32,7 @@ class Order extends Model
             'checked_in_at'   => 'datetime',
             'checked_out_at'  => 'datetime',
             'cancelled_at'    => 'datetime',
+            'refunded_at'     => 'datetime',
             'staff_marked_unavailable' => 'boolean',
         ];
     }

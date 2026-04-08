@@ -479,8 +479,8 @@ repo/
 │   │   └── web.php                  # Livewire web routes (session auth)
 │   ├── app/                         # Application code (see architecture above)
 │   ├── database/
-│   │   ├── migrations/              # 19 migration files
-│   │   └── seeders/                 # 9 seeder files
+│   │   ├── migrations/              # 24 migration files
+│   │   └── seeders/                 # 10 seeder files
 │   ├── resources/views/             # Blade templates + Livewire views
 │   ├── public/index.php             # Web entry point
 │   └── storage/                     # Logs, cache, sessions (runtime)

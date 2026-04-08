@@ -43,10 +43,38 @@ return new class extends Migration
             BEFORE UPDATE OR DELETE ON audit_logs
             FOR EACH ROW EXECUTE FUNCTION prevent_audit_mutation();
         ");
+
+        // Row-level triggers do NOT fire for TRUNCATE — Postgres skips
+        // them entirely. Without an explicit guard, a malicious or buggy
+        // code path could wipe the entire append-only audit history with
+        // a single statement and leave no trace. Defence in depth here
+        // is mandatory:
+        //
+        //   1. STATEMENT-level BEFORE TRUNCATE trigger that re-uses the
+        //      same prevent_audit_mutation() function so any TRUNCATE on
+        //      audit_logs raises immediately, regardless of who runs it.
+        //   2. REVOKE TRUNCATE (and other destructive statement-level
+        //      privileges) from the application role. The owner of the
+        //      database bypasses GRANT/REVOKE in Postgres, so the trigger
+        //      above is the load-bearing protection — but the REVOKE is
+        //      still required to satisfy least-privilege audits and to
+        //      block any non-owner role that ever connects with the same
+        //      credentials profile.
+        DB::statement("
+            CREATE TRIGGER audit_logs_no_truncate
+            BEFORE TRUNCATE ON audit_logs
+            FOR EACH STATEMENT EXECUTE FUNCTION prevent_audit_mutation();
+        ");
+
+        $appRole = config('database.connections.pgsql.username') ?: env('DB_USERNAME', 'app_user');
+        // Quote-safe: identifier is sourced from config, not user input.
+        $quoted = '"' . str_replace('"', '""', $appRole) . '"';
+        DB::statement("REVOKE TRUNCATE, DELETE, UPDATE ON TABLE audit_logs FROM {$quoted}");
     }
 
     public function down(): void
     {
+        DB::statement('DROP TRIGGER IF EXISTS audit_logs_no_truncate ON audit_logs');
         DB::statement('DROP TRIGGER IF EXISTS audit_logs_immutable ON audit_logs');
         DB::statement('DROP FUNCTION IF EXISTS prevent_audit_mutation()');
         Schema::dropIfExists('audit_logs');

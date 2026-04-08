@@ -11,12 +11,16 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Token Lifetimes (minutes)
+    | Token Lifetimes (minutes) and session policy
     |--------------------------------------------------------------------------
+    | All values are environment-driven so the operational policy can
+    | be tuned without code changes. Defaults preserve the historical
+    | hard-coded values: 30-minute access TTL, 7-day refresh window,
+    | 2 concurrent sessions per account.
     */
-    'access_ttl'      => 30,       // 30-minute inactivity window
-    'refresh_ttl'     => 10080,    // 7 days max total session
-    'max_sessions'    => 2,        // concurrent device cap per account
+    'access_ttl'      => (int) env('JWT_ACCESS_TTL', 30),
+    'refresh_ttl'     => (int) env('JWT_REFRESH_TTL', 10080),
+    'max_sessions'    => (int) env('JWT_MAX_SESSIONS', 2),
 
     /*
     |--------------------------------------------------------------------------

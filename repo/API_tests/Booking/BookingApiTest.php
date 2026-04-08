@@ -4,8 +4,6 @@ namespace ApiTests\Booking;
 
 use App\Domain\Models\BookableItem;
 use App\Domain\Models\Coupon;
-use App\Domain\Models\Permission;
-use App\Domain\Models\RolePermission;
 use App\Domain\Models\ServiceArea;
 use App\Domain\Models\Role;
 use ApiTests\TestCase;
@@ -32,11 +30,9 @@ class BookingApiTest extends TestCase
             'min_order_amount' => 0, 'valid_from' => now()->subDay(), 'is_active' => true,
         ]);
 
-        // Setup permissions for staff
-        foreach (['resources.create', 'resources.update', 'resources.transition'] as $slug) {
-            $p = Permission::firstOrCreate(['slug' => $slug]);
-            RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-        }
+        // No staff permission seeding: foundational entity writes are
+        // strictly admin-only. The tests below that exercise resource
+        // and pricing-baseline writes use admin actors.
     }
 
     public function test_list_service_areas_authenticated(): void
@@ -58,18 +54,18 @@ class BookingApiTest extends TestCase
 
     public function test_create_resource_with_status(): void
     {
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $sa = ServiceArea::first();
         $role = Role::create(['name' => 'Cr', 'slug' => 'cr-' . mt_rand(), 'level' => 1]);
         $response = $this->postJson('/api/resources', [
             'name' => 'StatusRes', 'service_area_id' => $sa->id, 'role_id' => $role->id,
-        ], $this->authHeaders($staff));
+        ], $this->authHeaders($admin));
         $response->assertStatus(201)->assertJsonPath('data.status', 'available');
     }
 
     public function test_resource_transition(): void
     {
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $sa = ServiceArea::first();
         $role = Role::create(['name' => 'Tr', 'slug' => 'tr-' . mt_rand(), 'level' => 1]);
         $r = \App\Domain\Models\Resource::create([
@@ -78,12 +74,12 @@ class BookingApiTest extends TestCase
         ]);
         $this->postJson("/api/resources/{$r->id}/transition", [
             'status' => 'reserved', 'reason' => 'Approved',
-        ], $this->authHeaders($staff))->assertOk()->assertJsonPath('data.status', 'reserved');
+        ], $this->authHeaders($admin))->assertOk()->assertJsonPath('data.status', 'reserved');
     }
 
     public function test_invalid_resource_transition(): void
     {
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $sa = ServiceArea::first();
         $role = Role::create(['name' => 'IT', 'slug' => 'it-' . mt_rand(), 'level' => 1]);
         $r = \App\Domain\Models\Resource::create([
@@ -92,37 +88,31 @@ class BookingApiTest extends TestCase
         ]);
         $this->postJson("/api/resources/{$r->id}/transition", [
             'status' => 'in_use',
-        ], $this->authHeaders($staff))->assertStatus(422);
+        ], $this->authHeaders($admin))->assertStatus(422);
     }
 
     public function test_pricing_baseline_crud(): void
     {
-        $perm = Permission::firstOrCreate(['slug' => 'pricing-baselines.create']);
-        RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $perm->id]);
-
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $sa = ServiceArea::first();
         $role = Role::create(['name' => 'PB', 'slug' => 'pb-' . mt_rand(), 'level' => 1]);
 
         $this->postJson('/api/pricing-baselines', [
             'service_area_id' => $sa->id, 'role_id' => $role->id,
             'hourly_rate' => 75, 'effective_from' => '2026-01-01',
-        ], $this->authHeaders($staff))->assertStatus(201);
+        ], $this->authHeaders($admin))->assertStatus(201);
     }
 
     public function test_pricing_baseline_below_minimum_fails(): void
     {
-        $perm = Permission::firstOrCreate(['slug' => 'pricing-baselines.create']);
-        RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $perm->id]);
-
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $sa = ServiceArea::first();
         $role = Role::create(['name' => 'PL', 'slug' => 'pl-' . mt_rand(), 'level' => 1]);
 
         $this->postJson('/api/pricing-baselines', [
             'service_area_id' => $sa->id, 'role_id' => $role->id,
             'hourly_rate' => 5, 'effective_from' => '2026-01-01',
-        ], $this->authHeaders($staff))->assertStatus(422);
+        ], $this->authHeaders($admin))->assertStatus(422);
     }
 
     public function test_health_endpoint_public(): void

@@ -308,6 +308,13 @@ class OrderApiTest extends TestCase
 
     public function test_staff_with_profile_can_approve_pending_order(): void
     {
+        // The pending → confirmed transition is the *operational*
+        // approval queue and must be functional for the role the
+        // queue exists for: staff-with-profile (NOT admin). The
+        // earlier version of this test silently used $admin, which
+        // hid bugs in the staff approval path. We now exercise the
+        // actual production path: a customer's draft is submitted,
+        // then approved by a staff member who is not the owner.
         $owner = $this->createUser('user');
         $staff = $this->staffWithProfile();
         $resp = $this->postJson('/api/orders', [
@@ -315,9 +322,9 @@ class OrderApiTest extends TestCase
         ], $this->authHeaders($owner));
         $orderId = $resp->json('data.id');
         $this->postJson("/api/orders/{$orderId}/transition", ['status' => 'pending'], $this->authHeaders($owner))->assertOk();
-        // Admin must approve since the order isn't owned by this staff member.
-        $admin = $this->createUser('admin');
-        $this->postJson("/api/orders/{$orderId}/transition", ['status' => 'confirmed'], $this->authHeaders($admin))
+        // Staff-with-profile clears the queue — the approval is
+        // queue-based, not ownership-based, so this MUST succeed.
+        $this->postJson("/api/orders/{$orderId}/transition", ['status' => 'confirmed'], $this->authHeaders($staff))
             ->assertOk()->assertJsonPath('data.status', 'confirmed');
     }
 
@@ -388,5 +395,125 @@ class OrderApiTest extends TestCase
         $order = $this->createSampleOrder($owner);
         $this->postJson("/api/orders/{$order->id}/mark-unavailable", [], $this->authHeaders($other))
             ->assertStatus(403);
+    }
+
+    // --- Refund state-gate + idempotency ---
+
+    public function test_refund_blocked_for_non_refundable_state(): void
+    {
+        // Refunds are only valid out of `cancelled` or `completed`.
+        // A confirmed (live) order must be rejected with 403 — the
+        // policy gate fires before the controller transaction.
+        $user = $this->staffWithProfile();
+        $order = $this->createSampleOrder($user);
+        $order->update(['status' => 'confirmed']);
+        $this->postJson("/api/orders/{$order->id}/refund", ['reason' => 'no'], $this->authHeaders($user))
+            ->assertStatus(403);
+    }
+
+    public function test_duplicate_refund_attempt_returns_403(): void
+    {
+        // First refund should succeed and stamp `refunded_at`.
+        // The second call must be rejected by the policy idempotency
+        // guard with 403, NOT a 500 from a duplicate-row exception.
+        $user = $this->staffWithProfile();
+        $order = $this->createSampleOrder($user);
+        $order->update(['status' => 'completed']);
+
+        $this->postJson("/api/orders/{$order->id}/refund", ['reason' => 'first'], $this->authHeaders($user))
+            ->assertOk();
+
+        $this->postJson("/api/orders/{$order->id}/refund", ['reason' => 'second'], $this->authHeaders($user))
+            ->assertStatus(403);
+
+        // And the database has exactly one refund row.
+        $this->assertSame(1, \App\Domain\Models\Refund::where('order_id', $order->id)->count());
+        // The order carries the idempotency stamp.
+        $this->assertNotNull($order->fresh()->refunded_at);
+    }
+
+    // --- Consumable inventory: oversell guard ---
+
+    public function test_consumable_oversell_returns_403_at_pending_transition(): void
+    {
+        // A consumable with stock=2 and TWO drafts each requesting
+        // qty=2 must let only ONE draft submit successfully. The
+        // second submission must be rejected with 403 by the
+        // reserveConsumables row-locked guard, and the underlying
+        // stock must end at 0 (not -2).
+        $consumable = BookableItem::create([
+            'type' => 'consumable', 'name' => 'Bench Reagent',
+            'unit_price' => 5, 'tax_rate' => 0, 'stock' => 2,
+            'capacity' => 1, 'is_active' => true,
+        ]);
+
+        $userA = $this->createUser('user');
+        $userB = $this->createUser('user');
+
+        $a = $this->postJson('/api/orders', [
+            'line_items' => [['bookable_item_id' => $consumable->id, 'booking_date' => '2026-10-01', 'quantity' => 2]],
+        ], $this->authHeaders($userA))->assertStatus(201);
+
+        $b = $this->postJson('/api/orders', [
+            'line_items' => [['bookable_item_id' => $consumable->id, 'booking_date' => '2026-10-01', 'quantity' => 2]],
+        ], $this->authHeaders($userB))->assertStatus(201);
+
+        // First submit decrements stock: 2 → 0.
+        $this->postJson("/api/orders/{$a->json('data.id')}/transition", ['status' => 'pending'], $this->authHeaders($userA))
+            ->assertOk();
+        // Second submit must be denied by the oversell guard.
+        $this->postJson("/api/orders/{$b->json('data.id')}/transition", ['status' => 'pending'], $this->authHeaders($userB))
+            ->assertStatus(403);
+
+        $this->assertSame(0, (int) $consumable->fresh()->stock);
+    }
+
+    // --- Status filter (pending workflow surfacing) ---
+
+    public function test_orders_index_filters_by_pending_status(): void
+    {
+        // The Livewire OrderIndex now exposes 'pending' as a filter
+        // option so staff can monitor the approval queue. Verify the
+        // backing API actually narrows the result set when ?status=pending
+        // is passed and that non-pending orders never leak through.
+        $staff = $this->staffWithProfile();
+
+        $confirmed = $this->createSampleOrder($staff);
+        $pending = Order::create([
+            'order_number' => 'ORD-PENDING-' . mt_rand(),
+            'user_id' => $staff->id,
+            'status' => 'pending',
+            'subtotal' => 75, 'total' => 75, 'confirmed_at' => now(),
+        ]);
+
+        $resp = $this->getJson('/api/orders?status=pending', $this->authHeaders($staff))->assertOk();
+        $ids = collect($resp->json('data'))->pluck('id');
+        $this->assertTrue($ids->contains($pending->id),
+            'Pending orders must be returned when ?status=pending is supplied');
+        $this->assertFalse($ids->contains($confirmed->id),
+            'Non-pending orders must NOT leak into a pending-only query');
+    }
+
+    public function test_consumable_stock_restored_on_cancel(): void
+    {
+        // Restore semantics: pending → cancelled must put the
+        // committed quantity back on the shelf so the next customer
+        // can claim it.
+        $consumable = BookableItem::create([
+            'type' => 'consumable', 'name' => 'Restore Reagent',
+            'unit_price' => 5, 'tax_rate' => 0, 'stock' => 3,
+            'capacity' => 1, 'is_active' => true,
+        ]);
+
+        $user = $this->createUser('user');
+        $order = $this->postJson('/api/orders', [
+            'line_items' => [['bookable_item_id' => $consumable->id, 'booking_date' => '2026-10-02', 'quantity' => 2]],
+        ], $this->authHeaders($user))->assertStatus(201)->json('data.id');
+
+        $this->postJson("/api/orders/{$order}/transition", ['status' => 'pending'], $this->authHeaders($user))->assertOk();
+        $this->assertSame(1, (int) $consumable->fresh()->stock);
+
+        $this->postJson("/api/orders/{$order}/transition", ['status' => 'cancelled'], $this->authHeaders($user))->assertOk();
+        $this->assertSame(3, (int) $consumable->fresh()->stock);
     }
 }

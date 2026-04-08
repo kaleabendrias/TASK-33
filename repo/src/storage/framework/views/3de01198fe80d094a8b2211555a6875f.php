@@ -5,7 +5,7 @@
         <input wire:model.live.debounce.300ms="search" type="search" placeholder="Search by order #…" class="flex-1 rounded-lg border-surface-200 text-sm" aria-label="Search orders"/>
         <select wire:model.live="statusFilter" class="rounded-lg border-surface-200 text-sm w-full sm:w-48" aria-label="Filter by status">
             <option value="">All Statuses</option>
-            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__currentLoopData = ['draft','confirmed','checked_in','checked_out','completed','cancelled','refunded']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $s): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
+            <?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if BLOCK]><![endif]--><?php endif; ?><?php $__currentLoopData = ['draft','pending','confirmed','checked_in','checked_out','completed','cancelled','refunded']; $__env->addLoop($__currentLoopData); foreach($__currentLoopData as $s): $__env->incrementLoopIndices(); $loop = $__env->getLastLoop(); ?>
                 <option value="<?php echo e($s); ?>"><?php echo e(ucfirst(str_replace('_',' ',$s))); ?></option>
             <?php endforeach; $__env->popLoop(); $loop = $__env->getLastLoop(); ?><?php if(\Livewire\Mechanisms\ExtendBlade\ExtendBlade::isRenderingLivewireComponent()): ?><!--[if ENDBLOCK]><![endif]--><?php endif; ?>
         </select>

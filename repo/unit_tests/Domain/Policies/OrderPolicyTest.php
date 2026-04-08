@@ -207,13 +207,38 @@ class OrderPolicyTest extends TestCase
     {
         $staff = $this->makeUser('staff');
         $order = $this->makeOrder($staff);
+        // The refund state-gate requires the order to be in
+        // 'cancelled' or 'completed' first — refunds are not legal
+        // out of an in-flight reservation.
+        $order->update(['status' => 'completed']);
         $this->assertTrue($this->policy->refund($staff, $order));
+    }
+
+    public function test_owner_cannot_refund_active_order(): void
+    {
+        // State-gate: a confirmed (live) order MUST NOT be refundable
+        // even by an authorized owner — this is the foot-gun that
+        // OrderPolicy::REFUNDABLE_STATUSES exists to close.
+        $staff = $this->makeUser('staff');
+        $order = $this->makeOrder($staff); // default status = 'confirmed'
+        $this->assertFalse($this->policy->refund($staff, $order));
+    }
+
+    public function test_already_refunded_order_cannot_be_refunded_again(): void
+    {
+        // Idempotency guard: once `refunded_at` is stamped, the
+        // policy denies further refund attempts as a 403.
+        $staff = $this->makeUser('staff');
+        $order = $this->makeOrder($staff);
+        $order->update(['status' => 'completed', 'refunded_at' => now()]);
+        $this->assertFalse($this->policy->refund($staff, $order));
     }
 
     public function test_viewer_cannot_refund(): void
     {
         $viewer = $this->makeUser('user');
         $order = $this->makeOrder($viewer);
+        $order->update(['status' => 'completed']);
         $this->assertFalse($this->policy->refund($viewer, $order));
     }
 

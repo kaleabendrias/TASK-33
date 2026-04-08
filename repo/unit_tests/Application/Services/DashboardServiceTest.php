@@ -76,4 +76,46 @@ class DashboardServiceTest extends TestCase
         $this->assertArrayHasKey('totalUsers', $stats);
         $this->assertGreaterThanOrEqual(1, $stats['totalUsers']);
     }
+
+    public function test_dashboard_range_revenue_respects_custom_window(): void
+    {
+        // Two staff orders: one inside the explicit window, one outside.
+        // The custom-range total must include only the in-window order,
+        // proving that the dashboard now honours the from/to parameters
+        // instead of silently clamping to the calendar month.
+        $staff = $this->makeUser('staff');
+
+        Order::create([
+            'order_number' => 'D-IN-' . mt_rand(),
+            'user_id' => $staff->id,
+            'status' => 'completed',
+            'subtotal' => 200, 'total' => 200,
+            'confirmed_at' => '2026-02-15 10:00:00',
+        ]);
+        Order::create([
+            'order_number' => 'D-OUT-' . mt_rand(),
+            'user_id' => $staff->id,
+            'status' => 'completed',
+            'subtotal' => 999, 'total' => 999,
+            'confirmed_at' => '2026-03-15 10:00:00',
+        ]);
+
+        $stats = $this->svc->statsFor($staff, '2026-02-01', '2026-02-28');
+
+        $this->assertSame('2026-02-01', $stats['range_from']);
+        $this->assertSame('2026-02-28', $stats['range_to']);
+        $this->assertEqualsWithDelta(200.0, (float) $stats['rangeRevenue'], 0.001,
+            'Range revenue must only sum orders inside the explicit window');
+    }
+
+    public function test_dashboard_range_inverted_input_is_clamped(): void
+    {
+        // An end date before the start date must not silently swap the
+        // bounds — that would leak data outside what the operator asked
+        // for. The service clamps end := start (inclusive) instead.
+        $staff = $this->makeUser('staff');
+        $stats = $this->svc->statsFor($staff, '2026-02-10', '2026-02-01');
+        $this->assertSame('2026-02-10', $stats['range_from']);
+        $this->assertSame('2026-02-10', $stats['range_to']);
+    }
 }

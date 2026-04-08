@@ -2,6 +2,18 @@
     <h1 class="text-2xl font-bold text-surface-900 mb-6">Dashboard</h1>
 
     
+    <div class="flex flex-wrap items-end gap-3 mb-6" aria-label="Dashboard date range">
+        <div>
+            <label class="block text-sm font-medium text-surface-700 mb-1" for="dash-from">From</label>
+            <input id="dash-from" wire:model.live="dateFrom" type="date" class="rounded-lg border-surface-200 text-sm"/>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-surface-700 mb-1" for="dash-to">To</label>
+            <input id="dash-to" wire:model.live="dateTo" type="date" class="rounded-lg border-surface-200 text-sm"/>
+        </div>
+    </div>
+
+    
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8" role="region" aria-label="Key metrics">
         <?php if (isset($component)) { $__componentOriginal527fae77f4db36afc8c8b7e9f5f81682 = $component; } ?>
 <?php if (isset($attributes)) { $__attributesOriginal527fae77f4db36afc8c8b7e9f5f81682 = $attributes; } ?>
@@ -67,14 +79,14 @@
 <?php endif; ?>
             <?php if (isset($component)) { $__componentOriginal527fae77f4db36afc8c8b7e9f5f81682 = $component; } ?>
 <?php if (isset($attributes)) { $__attributesOriginal527fae77f4db36afc8c8b7e9f5f81682 = $attributes; } ?>
-<?php $component = Illuminate\View\AnonymousComponent::resolve(['view' => 'components.stat-card','data' => ['label' => 'Month Revenue','value' => '$'.number_format($monthRevenue ?? 0, 2),'icon' => 'banknotes']] + (isset($attributes) && $attributes instanceof Illuminate\View\ComponentAttributeBag ? $attributes->all() : [])); ?>
+<?php $component = Illuminate\View\AnonymousComponent::resolve(['view' => 'components.stat-card','data' => ['label' => 'Range Revenue','value' => '$'.number_format($rangeRevenue ?? $monthRevenue ?? 0, 2),'icon' => 'banknotes']] + (isset($attributes) && $attributes instanceof Illuminate\View\ComponentAttributeBag ? $attributes->all() : [])); ?>
 <?php $component->withName('stat-card'); ?>
 <?php if ($component->shouldRender()): ?>
 <?php $__env->startComponent($component->resolveView(), $component->data()); ?>
 <?php if (isset($attributes) && $attributes instanceof Illuminate\View\ComponentAttributeBag): ?>
 <?php $attributes = $attributes->except(\Illuminate\View\AnonymousComponent::ignoredParameterNames()); ?>
 <?php endif; ?>
-<?php $component->withAttributes(['label' => 'Month Revenue','value' => \Illuminate\View\Compilers\BladeCompiler::sanitizeComponentAttribute('$'.number_format($monthRevenue ?? 0, 2)),'icon' => 'banknotes']); ?>
+<?php $component->withAttributes(['label' => 'Range Revenue','value' => \Illuminate\View\Compilers\BladeCompiler::sanitizeComponentAttribute('$'.number_format($rangeRevenue ?? $monthRevenue ?? 0, 2)),'icon' => 'banknotes']); ?>
 <?php echo $__env->renderComponent(); ?>
 <?php endif; ?>
 <?php if (isset($__attributesOriginal527fae77f4db36afc8c8b7e9f5f81682)): ?>

@@ -1,6 +1,15 @@
 .git
 src/vendor
 src/node_modules
+# Runtime storage tree — recreated by the entrypoint inside the
+# container and bind-mounted at runtime, so the build context never
+# needs these. Excluding them also dodges the common host-side
+# permission trap where `src/storage/app/attachments` ends up owned
+# by the in-container www-data uid (82) and becomes unreadable by
+# the host build user, which would otherwise abort `docker build`
+# with "error from sender: ... permission denied".
+src/storage/app/attachments
+src/storage/framework
 src/storage/logs/*
 src/.phpunit.cache
 unit_tests

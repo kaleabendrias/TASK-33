@@ -2,7 +2,7 @@
 
 namespace ApiTests\Controllers;
 
-use App\Domain\Models\{Permission, Resource, Role, RolePermission, ServiceArea};
+use App\Domain\Models\{Resource, Role, ServiceArea};
 use ApiTests\TestCase;
 
 class ResourceControllerTest extends TestCase
@@ -15,10 +15,8 @@ class ResourceControllerTest extends TestCase
         parent::setUp();
         $this->sa = ServiceArea::create(['name' => 'RC SA', 'slug' => 'rc-sa']);
         $this->role = Role::create(['name' => 'RC Role', 'slug' => 'rc-role', 'level' => 1]);
-        foreach (['resources.create', 'resources.update', 'resources.transition'] as $slug) {
-            $p = Permission::firstOrCreate(['slug' => $slug]);
-            RolePermission::firstOrCreate(['role' => 'staff', 'permission_id' => $p->id]);
-        }
+        // No permission seeding: foundational entity writes are
+        // strictly admin-only.
     }
 
     public function test_index(): void
@@ -39,44 +37,68 @@ class ResourceControllerTest extends TestCase
             ->assertJsonPath('data.name', 'Show');
     }
 
-    public function test_store(): void
+    public function test_admin_can_store(): void
     {
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $this->postJson('/api/resources', [
             'name' => 'NewR', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
-        ], $this->authHeaders($staff))->assertStatus(201);
+        ], $this->authHeaders($admin))->assertStatus(201);
     }
 
-    public function test_update(): void
+    public function test_admin_can_update(): void
     {
         $r = Resource::create(['name' => 'Upd', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10]);
-        $staff = $this->createStaffWithProfile();
-        $this->putJson("/api/resources/{$r->id}", ['name' => 'Updated'], $this->authHeaders($staff))
+        $admin = $this->createUser('admin');
+        $this->putJson("/api/resources/{$r->id}", ['name' => 'Updated'], $this->authHeaders($admin))
             ->assertOk()->assertJsonPath('data.name', 'Updated');
     }
 
-    public function test_transition_valid(): void
+    public function test_admin_transition_valid(): void
     {
         $r = Resource::create(['name' => 'Trans', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10, 'status' => 'available']);
-        $staff = $this->createStaffWithProfile();
-        $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'reserved'], $this->authHeaders($staff))
+        $admin = $this->createUser('admin');
+        $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'reserved'], $this->authHeaders($admin))
             ->assertOk();
     }
 
-    public function test_transition_invalid(): void
+    public function test_admin_transition_invalid(): void
     {
         $r = Resource::create(['name' => 'BadT', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10, 'status' => 'available']);
-        $staff = $this->createStaffWithProfile();
-        $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'in_use'], $this->authHeaders($staff))
+        $admin = $this->createUser('admin');
+        $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'in_use'], $this->authHeaders($admin))
             ->assertStatus(422);
     }
 
-    public function test_store_with_parent_id(): void
+    public function test_admin_store_with_parent_id(): void
     {
         $parent = Resource::create(['name' => 'Parent', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10]);
-        $staff = $this->createStaffWithProfile();
+        $admin = $this->createUser('admin');
         $this->postJson('/api/resources', [
             'name' => 'Child', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'parent_id' => $parent->id,
-        ], $this->authHeaders($staff))->assertStatus(201)->assertJsonPath('data.parent_id', $parent->id);
+        ], $this->authHeaders($admin))->assertStatus(201)->assertJsonPath('data.parent_id', $parent->id);
+    }
+
+    public function test_staff_cannot_store(): void
+    {
+        $staff = $this->createStaffWithProfile('staff');
+        $this->postJson('/api/resources', [
+            'name' => 'X', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
+        ], $this->authHeaders($staff))->assertStatus(403);
+    }
+
+    public function test_group_leader_cannot_store(): void
+    {
+        $leader = $this->createStaffWithProfile('group-leader');
+        $this->postJson('/api/resources', [
+            'name' => 'X', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
+        ], $this->authHeaders($leader))->assertStatus(403);
+    }
+
+    public function test_staff_cannot_transition(): void
+    {
+        $r = Resource::create(['name' => 'X', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10, 'status' => 'available']);
+        $staff = $this->createStaffWithProfile('staff');
+        $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'reserved'], $this->authHeaders($staff))
+            ->assertStatus(403);
     }
 }

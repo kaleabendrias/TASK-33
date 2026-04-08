@@ -182,14 +182,41 @@ class BookingService
             // covering the order's service area. Admins bypass this check.
             // The check is skipped only if no service area is specified (free-form order).
             if ($leader->role !== 'admin' && $serviceAreaId !== null) {
-                $hasAssignment = GroupLeaderAssignment::where('user_id', $leader->id)
+                $assignment = GroupLeaderAssignment::where('user_id', $leader->id)
                     ->where('service_area_id', $serviceAreaId)
                     ->where('is_active', true)
-                    ->exists();
-                if (!$hasAssignment) {
+                    ->first();
+                if (!$assignment) {
                     throw ValidationException::withMessages([
                         'group_leader_id' => 'Group leader has no active assignment for this service area.',
                     ]);
+                }
+
+                // Location binding (previously ignored despite both
+                // bookable_items and group_leader_assignments carrying a
+                // `location` column). Semantics:
+                //   - Assignment.location NULL/empty  → leader covers all
+                //     locations in the service area (no narrowing).
+                //   - Assignment.location set         → every line item's
+                //     bookable_item.location must match (trim, case-insensitive).
+                //     Items with a NULL location are NOT covered by a
+                //     location-bound assignment.
+                $assignedLocation = $this->normalizeLocation($assignment->location);
+                if ($assignedLocation !== null) {
+                    $itemIds = array_values(array_unique(array_map(
+                        fn ($li) => (int) ($li['bookable_item_id'] ?? 0),
+                        $lineItems
+                    )));
+                    $itemLocations = BookableItem::whereIn('id', $itemIds)
+                        ->pluck('location', 'id');
+                    foreach ($itemIds as $iid) {
+                        $itemLoc = $this->normalizeLocation($itemLocations[$iid] ?? null);
+                        if ($itemLoc !== $assignedLocation) {
+                            throw ValidationException::withMessages([
+                                'group_leader_id' => 'Group leader is not assigned to the location of one or more booked items.',
+                            ]);
+                        }
+                    }
                 }
             }
         }
@@ -269,19 +296,122 @@ class BookingService
             throw ValidationException::withMessages(['status' => "Cannot transition from '{$order->status}' to '{$newStatus}'."]);
         }
 
-        $ts = match ($newStatus) {
-            'pending'     => [], // submitted for approval; no timestamp column
-            'confirmed'   => ['confirmed_at' => now()],
-            'checked_in'  => ['checked_in_at' => now()],
-            'checked_out' => ['checked_out_at' => now()],
-            'cancelled'   => ['cancelled_at' => now(), 'cancellation_reason' => $reason],
-            default       => [],
-        };
+        // Inventory bookkeeping for consumables. Wrapped in a single
+        // transaction so the status update and the stock movement
+        // commit (or roll back) atomically — partial state would let
+        // the system oversell on the next read.
+        return DB::transaction(function () use ($order, $newStatus, $reason) {
+            $previousStatus = $order->status;
 
-        $order->update(array_merge(['status' => $newStatus], $ts));
+            // Decrement on draft → pending. This is the canonical
+            // commit point: once the customer has submitted for
+            // approval the consumables are off the shelf.
+            if ($previousStatus === 'draft' && $newStatus === 'pending') {
+                $this->reserveConsumables($order);
+            }
 
-        $this->audit->log("order_{$newStatus}", 'Order', $order->id, null, ['reason' => $reason]);
+            // Restore on cancelled, but only if the previous state had
+            // already taken the stock. Going draft → cancelled never
+            // touched the pool. Cancelling AFTER refund (or refunded
+            // → anything) is excluded by the state machine above.
+            if ($newStatus === 'cancelled'
+                && in_array($previousStatus, BookableItem::RESERVING_STATUSES, true)) {
+                $this->restoreConsumables($order);
+            }
 
-        return $order->refresh();
+            $ts = match ($newStatus) {
+                'pending'     => [], // submitted for approval; no timestamp column
+                'confirmed'   => ['confirmed_at' => now()],
+                'checked_in'  => ['checked_in_at' => now()],
+                'checked_out' => ['checked_out_at' => now()],
+                'cancelled'   => ['cancelled_at' => now(), 'cancellation_reason' => $reason],
+                default       => [],
+            };
+
+            $order->update(array_merge(['status' => $newStatus], $ts));
+
+            $this->audit->log("order_{$newStatus}", 'Order', $order->id, null, ['reason' => $reason]);
+
+            return $order->refresh();
+        });
+    }
+
+    /**
+     * Decrement consumable stock for every line item on this order.
+     * Rows are SELECT … FOR UPDATE locked so two concurrent submits
+     * cannot oversell against the same starting stock.
+     *
+     * Aborts with 403 Forbidden if any line item would push stock
+     * below zero. 403 (rather than 422) is intentional and matches
+     * the test contract: oversell is treated as an authorization
+     * failure against the inventory invariant, not a user-correctable
+     * validation error — the user has no recourse to "fix" the input.
+     */
+    private function reserveConsumables(Order $order): void
+    {
+        foreach ($order->lineItems as $line) {
+            $item = BookableItem::lockForUpdate()->find($line->bookable_item_id);
+            if (!$item || !$item->isConsumable() || $item->stock === null) {
+                continue; // non-tracked / unlimited
+            }
+            if ($item->stock < $line->quantity) {
+                abort(403, "Insufficient stock for {$item->name}: requested {$line->quantity}, available {$item->stock}.");
+            }
+            $item->decrement('stock', $line->quantity);
+        }
+    }
+
+    /**
+     * Restore consumable stock when an order that had previously
+     * reserved inventory transitions to cancelled.
+     */
+    private function restoreConsumables(Order $order): void
+    {
+        foreach ($order->lineItems as $line) {
+            $item = BookableItem::lockForUpdate()->find($line->bookable_item_id);
+            if (!$item || !$item->isConsumable() || $item->stock === null) {
+                continue;
+            }
+            $item->increment('stock', $line->quantity);
+        }
+    }
+
+    /**
+     * Hard-delete (or auto-cancel) draft orders older than the
+     * configured TTL. Called by the scheduled console command so
+     * abandoned reservations don't permanently hold slot availability.
+     *
+     * Returns the number of orders cleaned up.
+     */
+    public function cleanupStaleDrafts(int $maxAgeMinutes = 60): int
+    {
+        $cutoff = now()->subMinutes($maxAgeMinutes);
+        $stale = Order::where('status', 'draft')
+            ->where('created_at', '<', $cutoff)
+            ->get();
+
+        $count = 0;
+        foreach ($stale as $order) {
+            // Drafts have not had stock decremented yet (decrement
+            // happens at draft → pending), so we just flip status
+            // and move on. Going through transitionOrder keeps the
+            // audit log honest.
+            $this->transitionOrder($order, 'cancelled', 'Auto-expired stale draft.');
+            $count++;
+        }
+        return $count;
+    }
+
+    /**
+     * Normalize a location string for binding comparisons. Returns null
+     * for blank/whitespace values so callers can distinguish "no
+     * location constraint" from a real value.
+     */
+    private function normalizeLocation(?string $location): ?string
+    {
+        if ($location === null) return null;
+        $trimmed = trim($location);
+        if ($trimmed === '') return null;
+        return mb_strtolower($trimmed);
     }
 }
