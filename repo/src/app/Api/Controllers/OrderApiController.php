@@ -137,6 +137,11 @@ class OrderApiController extends Controller
         // The lockForUpdate ensures a second concurrent request blocks
         // until this transaction commits, then sees `refunded_at != null`
         // and is rejected by the policy gate above.
+        // Payment-integration failures inside the closure bubble up to
+        // the global exception handler in bootstrap/app.php, which
+        // routes every non-quiet exception through the dedicated
+        // 'errors' channel with full stack-trace context. No targeted
+        // catch is needed here.
         return DB::transaction(function () use ($request, $id) {
             $order = Order::lockForUpdate()->findOrFail($id);
 

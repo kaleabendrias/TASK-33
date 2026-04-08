@@ -11,6 +11,7 @@ use App\Domain\Models\Settlement;
 use App\Domain\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SettlementService
 {
@@ -58,6 +59,21 @@ class SettlementService
 
         $this->audit->log('refund_processed', 'Order', $order->id, null, [
             'refund_amount' => $refundAmount, 'fee' => $fee,
+        ]);
+
+        // Business audit trail: refunds materially affect revenue and
+        // must be visible in the dedicated business log so finance
+        // operators can reconcile against external payment systems.
+        Log::channel('business')->info('refund.processed', [
+            'refund_id'              => $refund->id,
+            'order_id'               => $order->id,
+            'order_number'           => $order->order_number,
+            'user_id'                => $order->user_id,
+            'transaction_amount'     => (float) $refundAmount,
+            'original_amount'        => (float) $originalAmount,
+            'cancellation_fee'       => (float) $fee,
+            'is_full_refund'         => $isFullRefund || $staffOverride,
+            'staff_override'         => $staffOverride,
         ]);
 
         return $refund;
@@ -116,6 +132,23 @@ class SettlementService
                 'cycle_type' => $cycleType,
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
+            ]);
+
+            // Business event: a new settlement covers a real cash cycle
+            // and shapes downstream commission distribution. The
+            // structured payload mirrors what the CSV/PDF exports show
+            // so log consumers can reconcile both surfaces line-by-line.
+            Log::channel('business')->info('settlement.generated', [
+                'settlement_id'      => $settlement->id,
+                'reference'          => $settlement->reference,
+                'cycle_type'         => $cycleType,
+                'period_start'       => $periodStart,
+                'period_end'         => $periodEnd,
+                'transaction_amount' => (float) $settlement->net_amount,
+                'gross_amount'       => (float) $settlement->gross_amount,
+                'refund_total'       => (float) $settlement->refund_total,
+                'order_count'        => (int) $settlement->order_count,
+                'refund_count'       => (int) $settlement->refund_count,
             ]);
 
             return $settlement;
@@ -205,6 +238,23 @@ class SettlementService
             );
 
             $commissions[] = $commission;
+
+            // Business event: commission accrual is the accounting
+            // primitive group leaders are paid against. Logging it
+            // here gives finance an immutable, channel-isolated trail
+            // to cross-check against the settlements table.
+            Log::channel('business')->info('commission.generated', [
+                'commission_id'      => $commission->id,
+                'settlement_id'      => $settlementId,
+                'group_leader_id'    => $leaderId,
+                'cycle_type'         => $cycleType,
+                'cycle_start'        => $cycleStart,
+                'cycle_end'          => $cycleEnd,
+                'attributed_revenue' => (float) $revenue,
+                'transaction_amount' => (float) $commission->commission_amount,
+                'commission_rate'    => (float) $commission->commission_rate,
+                'order_count'        => (int) $leaderOrders->count(),
+            ]);
         }
 
         return $commissions;

@@ -79,6 +79,22 @@ class AttachmentController extends Controller
         } catch (\Throwable $e) {
             // Roll back the stored file if metadata persistence/validation fails.
             Storage::disk('local')->delete($path);
+            // Critical validation/persistence failure: capture full
+            // context in the dedicated 'errors' channel so operators
+            // can chase the underlying issue (disk full, schema drift,
+            // hash collision) without grepping the request stream.
+            Log::channel('errors')->error('attachment.persist_failed', [
+                'user_id'         => $user?->id,
+                'attachable_type' => $fqcn,
+                'attachable_id'   => $entity->id,
+                'mime'            => $mime,
+                'size_bytes'      => $sizeBytes,
+                'exception'       => $e::class,
+                'message'         => $e->getMessage(),
+                'file'            => $e->getFile(),
+                'line'            => $e->getLine(),
+                'trace'           => $e->getTraceAsString(),
+            ]);
             return response()->json(['message' => $e->getMessage()], 422);
         }
 

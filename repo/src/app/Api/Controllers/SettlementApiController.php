@@ -8,6 +8,7 @@ use App\Domain\Models\Settlement;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Log;
 
 class SettlementApiController extends Controller
 {
@@ -74,6 +75,20 @@ class SettlementApiController extends Controller
             'status' => 'finalized',
             'finalized_at' => now(),
             'finalized_by' => $user->id,
+        ]);
+
+        // Business event: finalization is the accounting "lock" — once
+        // recorded the settlement is immutable and pays out. Routed
+        // through the dedicated business channel so the audit trail
+        // does not depend solely on the audit_logs table.
+        Log::channel('business')->info('settlement.finalized', [
+            'settlement_id'      => $settlement->id,
+            'reference'          => $settlement->reference,
+            'finalized_by'       => $user->id,
+            'transaction_amount' => (float) $settlement->net_amount,
+            'gross_amount'       => (float) $settlement->gross_amount,
+            'refund_total'       => (float) $settlement->refund_total,
+            'order_count'        => (int) $settlement->order_count,
         ]);
 
         return response()->json(['data' => $settlement->refresh()]);

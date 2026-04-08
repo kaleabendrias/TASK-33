@@ -30,6 +30,10 @@ class ExportApiController extends Controller
         $from = $request->input('date_from');
         $to = $request->input('date_to');
 
+        // Export pipeline failures (filesystem, streamer, PDF renderer)
+        // bubble up to the global exception handler in bootstrap/app.php
+        // which logs them through the 'errors' channel with full
+        // stack-trace context. No per-controller catch is required.
         [$headers, $rows] = match ($type) {
             'orders' => $this->ordersData($user, $from, $to),
             'settlements' => $this->settlementsData($user, $from, $to),

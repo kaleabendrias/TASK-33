@@ -11,6 +11,7 @@ use App\Domain\Models\Order;
 use App\Domain\Models\OrderLineItem;
 use App\Domain\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class BookingService
@@ -269,6 +270,24 @@ class BookingService
                 'total' => $totals['total'], 'items' => count($totals['lines']),
             ]);
 
+            // Business audit trail: every order creation is a high-value
+            // lifecycle event. Routed through the dedicated 'business'
+            // channel so operators can tail order activity independently
+            // of the security/error firehose.
+            Log::channel('business')->info('order.created', [
+                'order_id'           => $order->id,
+                'order_number'       => $order->order_number,
+                'user_id'            => $userId,
+                'group_leader_id'    => $groupLeaderId,
+                'service_area_id'    => $serviceAreaId,
+                'transaction_amount' => (float) $totals['total'],
+                'subtotal'           => (float) $totals['subtotal'],
+                'tax_amount'         => (float) $totals['tax_amount'],
+                'discount_amount'    => (float) $totals['discount'],
+                'line_item_count'    => count($totals['lines']),
+                'coupon_id'          => $totals['coupon_id'],
+            ]);
+
             return $order->load('lineItems.bookableItem');
         });
     }
@@ -331,6 +350,20 @@ class BookingService
             $order->update(array_merge(['status' => $newStatus], $ts));
 
             $this->audit->log("order_{$newStatus}", 'Order', $order->id, null, ['reason' => $reason]);
+
+            // Business lifecycle event: every status transition is a
+            // first-class business signal. Logged structured so the
+            // 'business' channel doubles as a queryable activity feed.
+            Log::channel('business')->info('order.transitioned', [
+                'order_id'           => $order->id,
+                'order_number'       => $order->order_number,
+                'user_id'            => $order->user_id,
+                'group_leader_id'    => $order->group_leader_id,
+                'previous_status'    => $previousStatus,
+                'new_status'         => $newStatus,
+                'transaction_amount' => (float) $order->total,
+                'reason'             => $reason,
+            ]);
 
             return $order->refresh();
         });
