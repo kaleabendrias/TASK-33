@@ -60,15 +60,18 @@ class CorrelationId
         // that hand the ID off to a queue worker.
         $request->attributes->set('correlation_id', $correlationId);
 
-        // Push into the global log context. Every Log::* call from
-        // here on — Log::info, Log::channel('security')->warning,
-        // Log::channel('business')->info, Log::channel('errors')->error,
-        // and so on — automatically carries this field. The context
-        // is reset between requests by Laravel's normal request
-        // lifecycle (the framework calls Log::flushSharedContext()
-        // implicitly when a new request starts), so there is no
-        // bleed across concurrent or sequential requests.
-        Log::withContext(['correlation_id' => $correlationId]);
+        // Push into the SHARED log context. `shareContext()` (not
+        // `withContext()`) is the load-bearing call here: it merges
+        // the field into every currently-resolved channel AND seeds
+        // every channel resolved later in the same request. So
+        // Log::channel('security')->warning(...),
+        // Log::channel('business')->info(...), and
+        // Log::channel('errors')->error(...) all automatically carry
+        // the same `correlation_id` even though none of them were
+        // touched by name before this point. The framework clears
+        // shared context between requests via the LogManager so
+        // there is no bleed across concurrent or sequential calls.
+        Log::shareContext(['correlation_id' => $correlationId]);
 
         /** @var Response $response */
         $response = $next($request);
