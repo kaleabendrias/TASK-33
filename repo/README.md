@@ -10,10 +10,14 @@ Offline-first booking, order, and settlement platform built with Laravel 11, Liv
 
 ```bash
 git clone <repo-url> && cd repo
-docker compose up -d
+./start.sh                # generates ephemeral pgAdmin secrets in-memory
 ```
 
+`start.sh` generates high-entropy pgAdmin credentials in the calling shell, pipes them into `docker compose` via `--env-file <(...)` process substitution, and prints them once on stdout. They are never written to disk. Restarting the stack rotates them.
+
 First boot takes 2-3 minutes (pulls images, installs Composer dependencies, runs migrations and seeders). Subsequent starts are near-instant.
+
+> **Do not run `docker compose up` directly.** The Compose file requires `PGADMIN_DEFAULT_EMAIL` and `PGADMIN_DEFAULT_PASSWORD` to be set in the calling environment, and will refuse to start with a hard error if either is missing — see the *Zero-Config-File security model* section below.
 
 ### Exposed Ports
 
@@ -31,7 +35,17 @@ First boot takes 2-3 minutes (pulls images, installs Composer dependencies, runs
 | Group Leader   | `groupleader`  | `Leader@1234567`  | group-leader  |
 | Staff          | `staff`        | `Staff@12345678`  | staff         |
 | Viewer         | `viewer`       | `Viewer@1234567`  | user          |
-| pgAdmin        | `admin@local.dev` | `admin`        | (DB browser)  |
+| pgAdmin        | *(see `start.sh` output)* | *(ephemeral, rotates on every restart)* | (DB browser)  |
+
+### Zero-Config-File security model
+
+Sensitive infrastructure credentials — currently the pgAdmin admin email and password — are subject to a hard rule: **they exist only inside the ephemeral runtime environment of the container orchestrator.** Concretely:
+
+* **No `.env` file is read or written.** The repository does not contain one and `start.sh` will not create one.
+* **No fallback defaults exist in `docker-compose.yml`.** The variables are interpolated as `${PGADMIN_DEFAULT_EMAIL:?…}` / `${PGADMIN_DEFAULT_PASSWORD:?…}`, which makes Docker Compose abort with a hard error if either is unset or empty.
+* **Credentials are generated in-memory by `scripts/runtime-secrets.sh`** (sourced by both `start.sh` and `run_tests.sh`) and injected into Compose via `--env-file <(secrets_env_file)` process substitution. The substituted file descriptor is read once at boot and never materialised on disk.
+* **A pre-injected secret is honoured.** A CI orchestrator that already provides `PGADMIN_DEFAULT_EMAIL` and `PGADMIN_DEFAULT_PASSWORD` in its host environment overrides the generator without modifying the helper.
+* **The historical `admin@local.dev` / `admin` defaults are gone.** A regression test in `API_tests/Security/EnvironmentHardeningTest.php` asserts the legacy values can never reappear in the codebase.
 
 ### Verify It Works
 

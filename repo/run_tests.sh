@@ -23,10 +23,21 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; }
 
+# ── 0. Generate ephemeral runtime secrets (Zero-Config-File model) ──
+# pgAdmin credentials are never hard-coded or persisted. We generate
+# high-entropy values in this shell and pipe them to docker compose
+# via `--env-file <(...)` process substitution. The ${VAR:?...} guards
+# in docker-compose.yml ensure the stack refuses to start if either
+# variable is unset or empty.
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/scripts/runtime-secrets.sh"
+generate_runtime_secrets
+info "Generated ephemeral pgAdmin credentials for this run (not persisted)"
+
 # ── 1. Boot Docker ──────────────────────────────────────────────────
 info "Building & starting Docker services..."
-docker compose down -v --remove-orphans 2>/dev/null || true
-docker compose up -d --build --wait 2>&1 | tail -10
+docker compose --env-file <(secrets_env_file) down -v --remove-orphans 2>/dev/null || true
+docker compose --env-file <(secrets_env_file) up -d --build --wait 2>&1 | tail -10
 
 info "Waiting for healthy app container..."
 timeout 180 bash -c 'until docker compose ps app --format json 2>/dev/null | grep -q healthy; do sleep 5; done' || {

@@ -41,6 +41,10 @@ services:
       - ./src:/var/www/html
       - ./unit_tests:/var/www/unit_tests
       - ./API_tests:/var/www/API_tests
+      # Read-only view of docker-compose.yml for the EnvironmentHardeningTest
+      # regression check: it asserts the historical pgAdmin defaults are
+      # not present and that the mandatory `${VAR:?...}` form is in use.
+      - ./docker-compose.yml:/var/www/docker-compose.yml:ro
     environment:
       # ── Application ────────────────────────────────────────────────
       APP_NAME: "ServicePlatform"
@@ -108,17 +112,24 @@ services:
       - app-network
 
   # ── pgAdmin (optional admin tooling) ───────────────────────────────
+  #
+  # Zero-Config-File security model: PGADMIN_DEFAULT_EMAIL and
+  # PGADMIN_DEFAULT_PASSWORD are MANDATORY and have NO default values.
+  # `${VAR:?...}` makes docker compose abort with a hard error if the
+  # variable is unset OR empty in the calling shell environment, so a
+  # weak fallback like "admin/admin" is structurally impossible to ship.
+  #
+  # The credentials are generated in-memory by run_tests.sh / start.sh
+  # and injected via `--env-file <(...)` process substitution. They
+  # exist only in the lifetime of the orchestrator process and the
+  # running container — nothing is ever persisted to a .env file.
   pgadmin:
     image: dpage/pgadmin4:latest
     ports:
       - "5050:80"
     environment:
-      # Host-injected: override via PGADMIN_EMAIL / PGADMIN_PASSWORD
-      # in your shell, systemd EnvironmentFile, or orchestrator
-      # secret driver. The defaults are dev-only and MUST NOT be
-      # used in any reachable environment.
-      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@local.dev}"
-      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:-admin}"
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_DEFAULT_EMAIL:?PGADMIN_DEFAULT_EMAIL must be injected at runtime — see start.sh / run_tests.sh}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_DEFAULT_PASSWORD:?PGADMIN_DEFAULT_PASSWORD must be injected at runtime — see start.sh / run_tests.sh}"
       PGADMIN_CONFIG_SERVER_MODE: "False"
     depends_on:
       postgres:
