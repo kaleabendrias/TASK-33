@@ -37,20 +37,22 @@ RUN apk add --no-cache \
         bcmath \
         gd
 
-# 2. PCOV (coverage driver). Installed and registered in its own layer
-#    so any failure aborts the build immediately instead of being
-#    masked by the next `&&`. We DO NOT rely on `docker-php-ext-enable`
-#    here — on some hosts that helper silently fails to write the
-#    conf.d/.ini file when apk's package index is stale, leaving an
-#    image where pcov.so exists on disk but PHP never loads it. We
-#    write the ini file ourselves and then verify the result.
+# 2. PCOV (coverage driver). We compile and install the .so but
+#    deliberately DO NOT register it via conf.d. The runtime test
+#    script loads pcov via an explicit `php -d extension=/abs/path`
+#    flag, which has proven to be the only loading mechanism that
+#    works consistently across hosts (some servers' apk index hiccups
+#    or seccomp profiles cause `docker-php-ext-enable` and conf.d
+#    scanning to silently no-op even though the .so is present and
+#    loadable). The build-time check verifies that PHP can ACTUALLY
+#    dlopen the .so via the same -d mechanism the test runner uses,
+#    so any image that reaches the registry can run the suite.
 RUN pecl install pcov \
     && PHP_EXT_DIR="$(php -r 'echo ini_get("extension_dir");')" \
     && test -f "$PHP_EXT_DIR/pcov.so" \
-    && printf 'extension=pcov.so\npcov.enabled=1\n' \
-        > /usr/local/etc/php/conf.d/docker-php-ext-pcov.ini \
-    && php -m | grep -qx pcov \
-    && echo "pcov OK"
+    && php -d "extension=$PHP_EXT_DIR/pcov.so" \
+           -r 'exit(extension_loaded("pcov") ? 0 : 1);' \
+    && echo "pcov loadable via -d ✓"
 
 # 3. Composer binary (single source of truth)
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -88,10 +90,15 @@ RUN composer install --prefer-dist --no-scripts --no-autoloader --no-interaction
     && composer dump-autoload --no-interaction \
     && chown -R www-data:www-data vendor storage bootstrap/cache
 
-# 6. Build-time sanity gate. If either of these binaries is missing the
-#    image is unusable, so fail loudly here rather than at test time.
+# 6. Build-time sanity gate. The image must contain phpunit and a
+#    loadable pcov.so. Both are functional checks (test the file is
+#    there, dlopen the extension via the same -d mechanism the test
+#    runner uses), not config-discovery checks.
 RUN test -x vendor/bin/phpunit \
-    && php -m | grep -qx pcov
+    && PHP_EXT_DIR="$(php -r 'echo ini_get("extension_dir");')" \
+    && test -f "$PHP_EXT_DIR/pcov.so" \
+    && php -d "extension=$PHP_EXT_DIR/pcov.so" \
+           -r 'exit(extension_loaded("pcov") ? 0 : 1);'
 
 COPY docker/php/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

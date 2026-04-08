@@ -5,9 +5,13 @@ set -euo pipefail
 # run_tests.sh — Boot services, create test DB, run both test suites
 # with per-suite coverage, exit nonzero if either drops below 90%.
 #
-# Pre-baked dev tooling lives in the `development` Dockerfile target,
-# so this script does NOT install composer/pcov at runtime — it only
-# orchestrates the test invocations against the already-built image.
+# Coverage strategy: pcov is built into the image and we load it via
+# an explicit `php -d extension=/abs/path/to/pcov.so` flag at command
+# launch. We do NOT depend on conf.d/.ini scanning, on PHP_INI_SCAN_DIR,
+# or on `php -m` listing pcov — those have proven fragile across hosts
+# (Alpine apk index hiccups during build, host seccomp profiles, stale
+# bind-mounts). Locating the .so file on disk is unambiguous and works
+# regardless of how the runtime environment was set up.
 #######################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,22 +23,41 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; }
 
-# ── 1. Boot Docker (build the development target — pcov pre-baked) ──
-info "Building & starting Docker services (development target)..."
+# ── 1. Boot Docker ──────────────────────────────────────────────────
+info "Building & starting Docker services..."
 docker compose down -v --remove-orphans 2>/dev/null || true
-docker compose up -d --build --wait 2>&1 | tail -5
+docker compose up -d --build --wait 2>&1 | tail -10
 
 info "Waiting for healthy app container..."
 timeout 180 bash -c 'until docker compose ps app --format json 2>/dev/null | grep -q healthy; do sleep 5; done' || {
     fail "App container did not become healthy"; docker compose logs app --tail 40; exit 1
 }
 
-# ── 2. Sanity check: pcov must already be loaded (it's baked in) ────
-if ! docker compose exec -T app php -m | grep -q pcov; then
-    fail "pcov is not loaded — the development image was not built correctly"
+# ── 2. Locate pcov.so on disk (do NOT rely on `php -m`) ─────────────
+# Searching the extension dir is unambiguous: if pcov.so exists, we
+# can load it via `php -d extension=...`. The previously-used
+# `php -m | grep pcov` precheck depended on conf.d/scan-dir discovery
+# which silently failed on some hosts even when the extension was
+# present and loadable.
+info "Locating pcov.so..."
+PCOV_SO="$(docker compose exec -T app sh -c \
+    'php -r "echo ini_get(\"extension_dir\");"' 2>/dev/null)/pcov.so"
+
+if ! docker compose exec -T app test -f "$PCOV_SO"; then
+    fail "pcov.so not found at expected path: $PCOV_SO"
+    docker compose exec -T app sh -c 'find /usr/local/lib/php -name pcov.so 2>/dev/null || true'
     exit 1
 fi
-info "pcov pre-baked into image ✓"
+info "pcov.so located at: $PCOV_SO"
+
+# Verify the runtime can actually load it via -d. This is a real
+# functional check (not a conf.d/scan-dir check) and exercises the
+# exact loading mechanism we use to run the suite below.
+if ! docker compose exec -T app php -d "extension=$PCOV_SO" -r 'exit(extension_loaded("pcov") ? 0 : 1);'; then
+    fail "pcov.so exists but PHP cannot load it via -d extension=..."
+    exit 1
+fi
+info "pcov loadable via -d extension ✓"
 
 # ── 3. Create the test database (idempotent) ────────────────────────
 info "Creating test database..."
@@ -51,10 +74,15 @@ run_suite() {
         'DB_DATABASE=service_platform_test php artisan migrate:fresh --force --no-interaction --quiet' 2>/dev/null
 
     info "Running ${suite_name}..."
+    # Load pcov via explicit -d extension=/abs/path so we never depend
+    # on conf.d/.ini being scanned at startup. -d pcov.enabled=1
+    # activates collection; the phpunit XML provides the include paths.
     docker compose exec -T app sh -c \
-        "php -d memory_limit=1024M -d pcov.enabled=1 \
-         vendor/bin/phpunit -c ${config_file} \
-            --coverage-text --colors=never 2>&1" \
+        "php -d memory_limit=1024M \
+             -d extension=${PCOV_SO} \
+             -d pcov.enabled=1 \
+             vendor/bin/phpunit -c ${config_file} \
+                --coverage-text --colors=never 2>&1" \
     | tee "/tmp/${suite_name}_output.txt"
 
     local exit_code=${PIPESTATUS[0]}
