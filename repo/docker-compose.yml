@@ -37,7 +37,6 @@ services:
     build:
       context: .
       dockerfile: docker/php/Dockerfile
-      target: development
     volumes:
       - ./src:/var/www/html
       - ./unit_tests:/var/www/unit_tests
