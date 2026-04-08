@@ -10,14 +10,18 @@ Offline-first booking, order, and settlement platform built with Laravel 11, Liv
 
 ```bash
 git clone <repo-url> && cd repo
-./start.sh                # generates ephemeral pgAdmin secrets in-memory
+docker compose up -d --build
 ```
 
-`start.sh` generates high-entropy pgAdmin credentials in the calling shell, pipes them into `docker compose` via `--env-file <(...)` process substitution, and prints them once on stdout. They are never written to disk. Restarting the stack rotates them.
+That's it. The pgAdmin container generates its own ephemeral admin credentials at startup; no shell exports, no `.env` file, no helper script. Retrieve the credentials when the stack is up:
+
+```bash
+docker compose logs pgadmin | grep -A2 'Zero-Config-File'
+```
+
+A convenience wrapper `./start.sh` runs the same command and prints the retrieval hint at the end.
 
 First boot takes 2-3 minutes (pulls images, installs Composer dependencies, runs migrations and seeders). Subsequent starts are near-instant.
-
-> **Do not run `docker compose up` directly.** The Compose file requires `PGADMIN_DEFAULT_EMAIL` and `PGADMIN_DEFAULT_PASSWORD` to be set in the calling environment, and will refuse to start with a hard error if either is missing — see the *Zero-Config-File security model* section below.
 
 ### Exposed Ports
 
@@ -39,13 +43,17 @@ First boot takes 2-3 minutes (pulls images, installs Composer dependencies, runs
 
 ### Zero-Config-File security model
 
-Sensitive infrastructure credentials — currently the pgAdmin admin email and password — are subject to a hard rule: **they exist only inside the ephemeral runtime environment of the container orchestrator.** Concretely:
+Sensitive infrastructure credentials — currently the pgAdmin admin email and password — are subject to a hard rule: **they exist only inside the ephemeral runtime environment of the running container.** Concretely:
 
-* **No `.env` file is read or written.** The repository does not contain one and `start.sh` will not create one.
-* **No fallback defaults exist in `docker-compose.yml`.** The variables are interpolated as `${PGADMIN_DEFAULT_EMAIL:?…}` / `${PGADMIN_DEFAULT_PASSWORD:?…}`, which makes Docker Compose abort with a hard error if either is unset or empty.
-* **Credentials are generated in-memory by `scripts/runtime-secrets.sh`** (sourced by both `start.sh` and `run_tests.sh`) and injected into Compose via `--env-file <(secrets_env_file)` process substitution. The substituted file descriptor is read once at boot and never materialised on disk.
-* **A pre-injected secret is honoured.** A CI orchestrator that already provides `PGADMIN_DEFAULT_EMAIL` and `PGADMIN_DEFAULT_PASSWORD` in its host environment overrides the generator without modifying the helper.
-* **The historical `admin@local.dev` / `admin` defaults are gone.** A regression test in `API_tests/Security/EnvironmentHardeningTest.php` asserts the legacy values can never reappear in the codebase.
+* **No `.env` file is read or written.** The repository does not contain one and no script will create one.
+* **No credentials live in `docker-compose.yml`.** Neither defaults nor mandatory `${VAR:?…}` guards. The historical `admin@local.dev` / `admin` pair is structurally impossible to reach.
+* **Plain `docker compose up` works on a fresh machine.** The pgAdmin service builds from `docker/pgadmin/Dockerfile`, which extends the official `dpage/pgadmin4` image with a wrapper entrypoint at `docker/pgadmin/entrypoint.sh`. That wrapper:
+    1. Generates a high-entropy random email (`ops-<12 random base64 chars>@example.com`) and a 32-character random password (≈192 bits of entropy) inside the running container.
+    2. Persists them in `/var/lib/pgadmin/.runtime_credentials` (mode 600) so a `docker compose restart` keeps the credentials matching the SQLite user database, and so a `docker compose down` rotates them on the next `up`.
+    3. Exports them as `PGADMIN_DEFAULT_EMAIL` / `PGADMIN_DEFAULT_PASSWORD` and execs the upstream pgAdmin entrypoint unchanged.
+    4. Echoes the credentials to stdout once so the operator can retrieve them via `docker compose logs pgadmin`.
+* **The host never sees the credentials.** Nothing crosses the container boundary except the one-shot stdout banner.
+* **A regression test in `API_tests/Security/EnvironmentHardeningTest.php`** asserts the legacy `admin@local.dev` / `admin` values cannot reappear in `docker-compose.yml`, that the pgadmin service builds from the wrapper Dockerfile rather than referencing the upstream image directly, and that an actual HTTP login attempt against pgAdmin with the historical defaults is rejected.
 
 ### Verify It Works
 
@@ -74,6 +82,10 @@ open http://localhost:8080/login   # or xdg-open on Linux
 docker compose down       # stop containers, keep data
 docker compose down -v    # stop containers, delete volumes (clean slate)
 ```
+
+### Observability
+
+Channel segmentation, per-request correlation IDs, log retention horizons, rotation responsibilities, and PII scrubbing rules are documented in [`docs/observability.md`](docs/observability.md). Every inbound HTTP request is stamped with an `X-Correlation-ID` header (also visible as `correlation_id` in every log line) so an operator can trace a single user action across the security, business, and errors channels with one grep.
 
 ---
 
@@ -493,7 +505,7 @@ repo/
 │   │   └── web.php                  # Livewire web routes (session auth)
 │   ├── app/                         # Application code (see architecture above)
 │   ├── database/
-│   │   ├── migrations/              # 24 migration files
+│   │   ├── migrations/              # 25 migration files
 │   │   └── seeders/                 # 10 seeder files
 │   ├── resources/views/             # Blade templates + Livewire views
 │   ├── public/index.php             # Web entry point

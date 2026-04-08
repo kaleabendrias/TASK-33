@@ -18,6 +18,19 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // CorrelationId is registered as a global middleware (and
+        // pushed to the very front of every group) so it runs BEFORE
+        // any auth, exception, or domain-logic middleware. Every
+        // subsequent log entry — security, business, errors, default
+        // stack — automatically carries the same `correlation_id`
+        // field, giving operators end-to-end traceability for one
+        // user action across every channel with a single grep.
+        $middleware->use([
+            \App\Api\Middleware\CorrelationId::class,
+        ]);
+        $middleware->prependToGroup('web', \App\Api\Middleware\CorrelationId::class);
+        $middleware->prependToGroup('api', \App\Api\Middleware\CorrelationId::class);
+
         $middleware->alias([
             'jwt.auth'         => \App\Api\Middleware\JwtAuthenticate::class,
             'role'             => \App\Api\Middleware\RequireRole::class,

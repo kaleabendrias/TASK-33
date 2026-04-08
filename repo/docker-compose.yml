@@ -113,23 +113,32 @@ services:
 
   # ── pgAdmin (optional admin tooling) ───────────────────────────────
   #
-  # Zero-Config-File security model: PGADMIN_DEFAULT_EMAIL and
-  # PGADMIN_DEFAULT_PASSWORD are MANDATORY and have NO default values.
-  # `${VAR:?...}` makes docker compose abort with a hard error if the
-  # variable is unset OR empty in the calling shell environment, so a
-  # weak fallback like "admin/admin" is structurally impossible to ship.
+  # Zero-Config-File security model:
   #
-  # The credentials are generated in-memory by run_tests.sh / start.sh
-  # and injected via `--env-file <(...)` process substitution. They
-  # exist only in the lifetime of the orchestrator process and the
-  # running container — nothing is ever persisted to a .env file.
+  # pgAdmin runs from a custom image (docker/pgadmin/Dockerfile) that
+  # wraps the official dpage/pgadmin4 with an entrypoint which
+  # generates high-entropy admin credentials INSIDE the container at
+  # startup, exports them as PGADMIN_DEFAULT_EMAIL and
+  # PGADMIN_DEFAULT_PASSWORD, then hands off to pgAdmin's normal init.
+  #
+  # Consequences:
+  #   * No credentials live in this file — neither defaults nor
+  #     mandatory ${VAR:?…} guards. The historical admin@local.dev /
+  #     admin pair is structurally impossible to reach.
+  #   * `docker compose build && docker compose up` works on a fresh
+  #     machine with no shell exports, no .env file, and no helper
+  #     script. There is nothing for an operator to forget to set.
+  #   * Credentials are unique per container instance. They are
+  #     printed once on startup — retrieve them with
+  #     `docker compose logs pgadmin`. `docker compose down` destroys
+  #     the container and rotates them on the next `up`.
   pgadmin:
-    image: dpage/pgadmin4:latest
+    build:
+      context: .
+      dockerfile: docker/pgadmin/Dockerfile
     ports:
       - "5050:80"
     environment:
-      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_DEFAULT_EMAIL:?PGADMIN_DEFAULT_EMAIL must be injected at runtime — see start.sh / run_tests.sh}"
-      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_DEFAULT_PASSWORD:?PGADMIN_DEFAULT_PASSWORD must be injected at runtime — see start.sh / run_tests.sh}"
       PGADMIN_CONFIG_SERVER_MODE: "False"
     depends_on:
       postgres:
