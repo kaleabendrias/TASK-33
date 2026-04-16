@@ -15,7 +15,6 @@ use App\Livewire\Orders\OrderIndex;
 use App\Livewire\Orders\OrderShow;
 use App\Livewire\Profile\StaffProfilePage;
 use App\Livewire\Settlement\SettlementIndex;
-use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 use ApiTests\TestCase;
 
@@ -39,33 +38,27 @@ class LivewireComponentTest extends TestCase
     }
 
     // ── Login ──────────────────────────────────────────────────────────
+    // Login component uses Http::post() to /api/auth/login internally.
+    // We test the actual endpoint contract directly (no mocking) and
+    // cover the component's own validation separately.
 
-    public function test_login_successful(): void
+    public function test_login_api_valid_credentials_returns_token(): void
     {
-        // Login is now API-decoupled — fake the /api/auth/login response.
-        Http::fake([
-            '*/auth/login' => Http::response([
-                'access_token' => 'header.eyJzdWIiOjEsInJvbGUiOiJ1c2VyIn0.sig',
-                'user' => ['full_name' => 'Logged In'],
-            ], 200),
-        ]);
-        Livewire::test(Login::class)
-            ->set('username', 'lvlog')
-            ->set('password', 'TestPass@12345!')
-            ->call('login')
-            ->assertRedirect('/dashboard');
+        $user = $this->createUser('user', ['username' => 'login_ok_lv']);
+        $this->postJson('/api/auth/login', [
+            'username' => 'login_ok_lv',
+            'password' => 'TestPass@12345!',
+        ])->assertOk()
+          ->assertJsonStructure(['access_token', 'token_type', 'expires_in']);
     }
 
-    public function test_login_invalid_sets_error(): void
+    public function test_login_api_invalid_credentials_returns_error(): void
     {
-        Http::fake([
-            '*/auth/login' => Http::response(['message' => 'bad'], 401),
-        ]);
-        Livewire::test(Login::class)
-            ->set('username', 'nonexistent')
-            ->set('password', 'WrongPass@12345!')
-            ->call('login')
-            ->assertSet('error', 'Invalid username or password.');
+        $this->postJson('/api/auth/login', [
+            'username' => 'no_such_user',
+            'password' => 'WrongPass@12345!',
+        ])->assertStatus(422)
+          ->assertJsonStructure(['message', 'errors']);
     }
 
     public function test_login_validation_required_fields(): void
@@ -97,7 +90,6 @@ class LivewireComponentTest extends TestCase
     {
         $u = $this->createUser('staff');
         $this->actAs($u);
-        Http::fake(['*/profile' => Http::response(['ok' => true], 200)]);
 
         Livewire::test(StaffProfilePage::class)
             ->set('employee_id', 'E1')
@@ -125,14 +117,12 @@ class LivewireComponentTest extends TestCase
     {
         $u = $this->createUser('user');
         $this->actAs($u);
-        Http::fake(['*/bookings/items*' => Http::response([
-            'data' => [['id' => 1, 'name' => 'Pens']], 'total' => 1,
-            'current_page' => 1, 'last_page' => 1, 'per_page' => 12,
-        ], 200)]);
-        $component = Livewire::test(BookingIndex::class);
-        $component->instance()->updatedSearch();
-        $component->instance()->updatedTypeFilter();
-        $this->assertTrue(true);
+        Livewire::test(BookingIndex::class)
+            ->set('search', 'lab')
+            ->set('typeFilter', 'room')
+            ->assertSet('search', 'lab')
+            ->assertSet('typeFilter', 'room')
+            ->assertOk();
     }
 
     // ── BookingCreate flows ────────────────────────────────────────────
@@ -146,13 +136,6 @@ class LivewireComponentTest extends TestCase
         ]);
         $u = $this->createUser('user');
         $this->actAs($u);
-
-        Http::fake([
-            '*/bookings/check-availability' => Http::response(['available' => true, 'conflicts' => []], 200),
-            '*/bookings/calculate-totals' => Http::response([
-                'lines' => [], 'subtotal' => 100, 'tax_amount' => 10, 'discount' => 0, 'total' => 110, 'coupon_id' => null,
-            ], 200),
-        ]);
 
         $component = Livewire::test(BookingCreate::class)
             ->set('selectedItemId', $item->id)
@@ -211,8 +194,6 @@ class LivewireComponentTest extends TestCase
     {
         $u = $this->createUser('user');
         $order = $this->makeOrder($u);
-        Http::fake(['*/transition' => Http::response(['data' => []], 200)]);
-
         $this->actAs($u);
         $component = Livewire::test(OrderShow::class, ['orderId' => $order->id])
             ->set('cancelReason', 'changed mind')
@@ -295,43 +276,57 @@ class LivewireComponentTest extends TestCase
 
     public function test_export_page_download(): void
     {
-        // Real /exports endpoint streams a CSV. Wrap in an output
-        // buffer so PHPUnit doesn't flag the test as risky for
-        // not closing the stream's own buffer.
-        $u = $this->createUser('user');
-        $this->actAs($u);
+        // Admin user always has export access. Real /exports endpoint streams a
+        // CSV. Wrap in an output buffer so PHPUnit doesn't flag the test as
+        // risky for not closing the stream's own buffer. Verify the underlying
+        // API endpoint serves CSV for valid input.
+        $admin = $this->createUser('admin');
+        $this->actAs($admin);
         ob_start();
         try {
-            $component = Livewire::test(ExportPage::class)
+            Livewire::test(ExportPage::class)
                 ->set('exportType', 'orders')
                 ->set('format', 'csv')
                 ->set('dateFrom', '2026-01-01')
                 ->set('dateTo', '2026-12-31')
                 ->call('download');
-            $this->assertNotNull($component);
         } finally {
             ob_end_clean();
         }
+        // Confirm the real API endpoint the component delegates to returns CSV.
+        $this->postJson('/api/exports', [
+            'type' => 'orders', 'format' => 'csv',
+            'date_from' => '2026-01-01', 'date_to' => '2026-12-31',
+        ], $this->authHeaders($admin))
+            ->assertOk()
+            ->assertHeader('content-type', 'text/csv; charset=UTF-8');
     }
 
     public function test_export_page_failure_flashes_error(): void
     {
-        // Trigger a real failure by passing an inverted date range
-        // so the export validator rejects with 422.
+        // Inverted date range → real 422 from the API → component handles
+        // the error gracefully (no exception, returns null). Confirm the
+        // underlying API truly rejects the invalid date range.
         $u = $this->createUser('user');
         $this->actAs($u);
         ob_start();
         try {
-            $component = Livewire::test(ExportPage::class)
+            Livewire::test(ExportPage::class)
                 ->set('exportType', 'orders')
                 ->set('format', 'csv')
                 ->set('dateFrom', '2026-12-31')
                 ->set('dateTo', '2026-01-01')
                 ->call('download');
-            $this->assertNotNull($component);
         } finally {
             ob_end_clean();
         }
+        // Confirm the real API rejects the inverted date range with 422.
+        $this->postJson('/api/exports', [
+            'type' => 'orders', 'format' => 'csv',
+            'date_from' => '2026-12-31', 'date_to' => '2026-01-01',
+        ], $this->authHeaders($u))
+            ->assertStatus(422)
+            ->assertJsonStructure(['message', 'errors']);
     }
 
     // ── Dashboard for various roles ─────────────────────────────────────
@@ -364,7 +359,6 @@ class LivewireComponentTest extends TestCase
         $staff = $this->createUser('staff');
         StaffProfile::create(['user_id' => $staff->id, 'employee_id' => 'E', 'department' => 'D', 'title' => 'T']);
         $order = $this->makeOrder($staff);
-        Http::fake(['*/transition' => Http::response(['data' => []], 200)]);
         $this->actAs($staff);
         $component = Livewire::test(OrderShow::class, ['orderId' => $order->id])->call('checkOut');
         $this->assertStringNotContainsString('not authorized', $component->get('error'));
@@ -375,7 +369,6 @@ class LivewireComponentTest extends TestCase
         $staff = $this->createUser('staff');
         StaffProfile::create(['user_id' => $staff->id, 'employee_id' => 'E', 'department' => 'D', 'title' => 'T']);
         $order = $this->makeOrder($staff);
-        Http::fake(['*/transition' => Http::response(['data' => []], 200)]);
         $this->actAs($staff);
         $component = Livewire::test(OrderShow::class, ['orderId' => $order->id])->call('complete');
         $this->assertStringNotContainsString('not authorized', $component->get('error'));
@@ -404,7 +397,6 @@ class LivewireComponentTest extends TestCase
         $staff = $this->createUser('staff');
         StaffProfile::create(['user_id' => $staff->id, 'employee_id' => 'E', 'department' => 'D', 'title' => 'T']);
         $order = $this->makeOrder($staff, 'completed');
-        Http::fake(['*/refund' => Http::response(['data' => []], 200)]);
         $this->actAs($staff);
         $component = Livewire::test(OrderShow::class, ['orderId' => $order->id])->call('refund');
         $this->assertEquals('', $component->get('error'));
@@ -440,7 +432,6 @@ class LivewireComponentTest extends TestCase
         $staff = $this->createUser('staff');
         StaffProfile::create(['user_id' => $staff->id, 'employee_id' => 'E', 'department' => 'D', 'title' => 'T']);
         $order = $this->makeOrder($staff);
-        Http::fake(['*/mark-unavailable' => Http::response([], 200)]);
         $this->actAs($staff);
         $component = Livewire::test(OrderShow::class, ['orderId' => $order->id])->call('markUnavailable');
         $this->assertEquals('', $component->get('error'));
@@ -452,13 +443,12 @@ class LivewireComponentTest extends TestCase
     {
         $u = $this->createUser('user');
         $this->actAs($u);
-        Http::fake(['*/orders*' => Http::response([
-            'data' => [], 'total' => 0, 'current_page' => 1, 'last_page' => 1, 'per_page' => 15,
-        ], 200)]);
-        $component = Livewire::test(OrderIndex::class)
+        Livewire::test(OrderIndex::class)
             ->set('search', 'foo')
-            ->set('statusFilter', 'confirmed');
-        $this->assertNotNull($component);
+            ->set('statusFilter', 'confirmed')
+            ->assertSet('search', 'foo')
+            ->assertSet('statusFilter', 'confirmed')
+            ->assertOk();
     }
 
     // ── SettlementIndex finalize failure path ──────────────────────────
@@ -478,15 +468,16 @@ class LivewireComponentTest extends TestCase
     {
         $u = $this->createUser('user');
         $this->actAs($u);
-        Livewire::test(BookingCreate::class)->call('checkAvailability');
-        $this->assertTrue(true);
+        // No selectedItemId set → early return, availabilityMsg is cleared to ''
+        Livewire::test(BookingCreate::class)
+            ->call('checkAvailability')
+            ->assertSet('availabilityMsg', '');
     }
 
     public function test_booking_create_apply_coupon_invalid(): void
     {
         $u = $this->createUser('user');
         $this->actAs($u);
-        Http::fake(['*/bookings/validate-coupon' => Http::response(['valid' => false, 'error' => 'expired'], 200)]);
         $component = Livewire::test(BookingCreate::class)
             ->set('totals', ['lines' => [], 'subtotal' => 100, 'tax_amount' => 10, 'discount' => 0, 'total' => 110, 'coupon_id' => null])
             ->set('couponCode', 'BAD')
@@ -510,9 +501,6 @@ class LivewireComponentTest extends TestCase
         ]);
         $u = $this->createUser('user');
         $this->actAs($u);
-        Http::fake([
-            '*/bookings/check-availability' => Http::response(['available' => true, 'conflicts' => []], 200),
-        ]);
         $component = Livewire::test(BookingCreate::class)
             ->set('selectedItemId', $item->id)
             ->set('bookingDate', '2026-12-15')
@@ -556,12 +544,13 @@ class LivewireComponentTest extends TestCase
         ]);
         $u = $this->createUser('user');
         $this->actAs($u);
-        $component = Livewire::test(BookingCreate::class)
+        // The real endpoint creates an order and the component redirects
+        // to /orders/{id} — assert the redirect and no error was set.
+        Livewire::test(BookingCreate::class)
             ->set('lineItems', [['bookable_item_id' => $item->id, 'booking_date' => '2026-12-01', 'start_time' => null, 'end_time' => null, 'quantity' => 1]])
-            ->call('submitOrder');
-        // The real endpoint creates an order and the component
-        // redirects to /orders/{id} — assert the redirect occurred.
-        $this->assertNotNull($component);
+            ->call('submitOrder')
+            ->assertRedirect()
+            ->assertSet('error', '');
     }
 
     public function test_booking_create_submit_order_failure(): void

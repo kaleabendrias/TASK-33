@@ -34,7 +34,8 @@ class RoleControllerTest extends TestCase
     {
         $admin = $this->createUser('admin');
         $this->postJson('/api/roles', ['name' => 'NewRole'], $this->authHeaders($admin))
-            ->assertStatus(201);
+            ->assertStatus(201)
+            ->assertJsonStructure(['data' => ['id', 'name', 'slug']]);
     }
 
     public function test_admin_can_update(): void
@@ -49,21 +50,24 @@ class RoleControllerTest extends TestCase
     {
         $staff = $this->createStaffWithProfile('staff');
         $this->postJson('/api/roles', ['name' => 'X'], $this->authHeaders($staff))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_group_leader_cannot_store(): void
     {
         $leader = $this->createStaffWithProfile('group-leader');
         $this->postJson('/api/roles', ['name' => 'X'], $this->authHeaders($leader))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_user_cannot_store(): void
     {
         $user = $this->createUser('user');
         $this->postJson('/api/roles', ['name' => 'X'], $this->authHeaders($user))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_staff_cannot_update(): void
@@ -71,6 +75,7 @@ class RoleControllerTest extends TestCase
         $staff = $this->createStaffWithProfile('staff');
         $role = Role::first();
         $this->putJson("/api/roles/{$role->id}", ['name' => 'X'], $this->authHeaders($staff))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 }

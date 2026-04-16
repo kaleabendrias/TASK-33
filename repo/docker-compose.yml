@@ -41,6 +41,7 @@ services:
       - ./src:/var/www/html
       - ./unit_tests:/var/www/unit_tests
       - ./API_tests:/var/www/API_tests
+      - ./frontend_tests:/var/www/frontend_tests
       # Read-only view of docker-compose.yml for the EnvironmentHardeningTest
       # regression check: it asserts the historical pgAdmin defaults are
       # not present and that the mandatory `${VAR:?...}` form is in use.

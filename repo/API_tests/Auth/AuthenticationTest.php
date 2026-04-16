@@ -53,9 +53,13 @@ class AuthenticationTest extends TestCase
     {
         $user = $this->createUser('admin', ['username' => 'logout_api']);
         $headers = $this->authHeaders($user);
-        $this->postJson('/api/auth/logout', [], $headers)->assertOk();
+        $this->postJson('/api/auth/logout', [], $headers)
+            ->assertOk()
+            ->assertJsonStructure(['message']);
         // Token should now be revoked
-        $this->getJson('/api/auth/me', $headers)->assertStatus(401);
+        $this->getJson('/api/auth/me', $headers)
+            ->assertStatus(401)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_refresh_token(): void
@@ -73,11 +77,15 @@ class AuthenticationTest extends TestCase
     public function test_concurrent_session_limit(): void
     {
         $user = $this->createUser('admin', ['username' => 'sess_limit']);
-        // Login 3 times — max_sessions is 2
-        $this->postJson('/api/auth/login', ['username' => 'sess_limit', 'password' => 'TestPass@12345!']);
-        $this->postJson('/api/auth/login', ['username' => 'sess_limit', 'password' => 'TestPass@12345!']);
-        $this->postJson('/api/auth/login', ['username' => 'sess_limit', 'password' => 'TestPass@12345!']);
+        // Login 3 times — max_sessions is 2; each login returns a token
+        $r1 = $this->postJson('/api/auth/login', ['username' => 'sess_limit', 'password' => 'TestPass@12345!']);
+        $r2 = $this->postJson('/api/auth/login', ['username' => 'sess_limit', 'password' => 'TestPass@12345!']);
+        $r3 = $this->postJson('/api/auth/login', ['username' => 'sess_limit', 'password' => 'TestPass@12345!']);
+        $r1->assertOk()->assertJsonStructure(['access_token']);
+        $r2->assertOk()->assertJsonStructure(['access_token']);
+        $r3->assertOk()->assertJsonStructure(['access_token']);
 
+        // After the 3rd login the oldest session must have been auto-revoked
         $active = UserSession::where('user_id', $user->id)->where('is_revoked', false)->count();
         $this->assertLessThanOrEqual(2, $active);
     }

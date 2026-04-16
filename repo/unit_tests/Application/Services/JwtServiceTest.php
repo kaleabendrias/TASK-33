@@ -1,12 +1,11 @@
 <?php
 
-namespace ApiTests\Auth;
+namespace UnitTests\Application\Services;
 
-use App\Domain\Models\User;
 use App\Domain\Models\UserSession;
 use App\Infrastructure\Auth\JwtService;
 use Illuminate\Http\Request;
-use ApiTests\TestCase;
+use UnitTests\TestCase;
 
 class JwtServiceTest extends TestCase
 {
@@ -38,7 +37,6 @@ class JwtServiceTest extends TestCase
     {
         $user = $this->createUser('admin');
         $tokens = $this->jwt->issueToken($user, Request::create('/'));
-        // Revoke all sessions
         UserSession::where('user_id', $user->id)->update(['is_revoked' => true]);
         $this->expectException(\RuntimeException::class);
         $this->jwt->validateToken($tokens['access_token']);

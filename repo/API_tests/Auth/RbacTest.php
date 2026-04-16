@@ -21,7 +21,9 @@ class RbacTest extends TestCase
     public function test_user_can_read_service_areas(): void
     {
         $user = $this->createUser('user');
-        $this->getJson('/api/service-areas', $this->authHeaders($user))->assertOk();
+        $this->getJson('/api/service-areas', $this->authHeaders($user))
+            ->assertOk()
+            ->assertJsonStructure(['data' => [['id', 'name', 'slug']]]);
     }
 
     public function test_user_cannot_write_service_areas(): void
@@ -48,9 +50,15 @@ class RbacTest extends TestCase
     {
         $admin = $this->createUser('admin');
         $h = $this->authHeaders($admin);
-        $this->getJson('/api/admin/users', $h)->assertOk();
-        $this->getJson('/api/admin/audit-logs', $h)->assertOk();
-        $this->postJson('/api/service-areas', ['name' => 'Admin Area'], $h)->assertStatus(201);
+        $this->getJson('/api/admin/users', $h)
+            ->assertOk()
+            ->assertJsonStructure(['data']);
+        $this->getJson('/api/admin/audit-logs', $h)
+            ->assertOk()
+            ->assertJsonStructure(['data']);
+        $this->postJson('/api/service-areas', ['name' => 'Admin Area'], $h)
+            ->assertStatus(201)
+            ->assertJsonPath('data.slug', 'admin-area');
     }
 
     // --- Permission-level checks ---

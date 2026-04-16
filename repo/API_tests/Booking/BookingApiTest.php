@@ -38,7 +38,9 @@ class BookingApiTest extends TestCase
     public function test_list_service_areas_authenticated(): void
     {
         $user = $this->createUser('user');
-        $this->getJson('/api/service-areas', $this->authHeaders($user))->assertOk();
+        $this->getJson('/api/service-areas', $this->authHeaders($user))
+            ->assertOk()
+            ->assertJsonStructure(['data' => [['id', 'name', 'slug']]]);
     }
 
     public function test_list_resources_authenticated(): void
@@ -49,7 +51,9 @@ class BookingApiTest extends TestCase
         \App\Domain\Models\Resource::create([
             'name' => 'ListR', 'service_area_id' => $sa->id, 'role_id' => $role->id, 'capacity_hours' => 100, 'is_available' => true,
         ]);
-        $this->getJson('/api/resources', $this->authHeaders($user))->assertOk();
+        $this->getJson('/api/resources', $this->authHeaders($user))
+            ->assertOk()
+            ->assertJsonStructure(['data' => [['id', 'name', 'status']]]);
     }
 
     public function test_create_resource_with_status(): void

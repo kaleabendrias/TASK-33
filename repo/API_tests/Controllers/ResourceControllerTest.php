@@ -42,7 +42,10 @@ class ResourceControllerTest extends TestCase
         $admin = $this->createUser('admin');
         $this->postJson('/api/resources', [
             'name' => 'NewR', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
-        ], $this->authHeaders($admin))->assertStatus(201);
+        ], $this->authHeaders($admin))
+            ->assertStatus(201)
+            ->assertJsonStructure(['data' => ['id', 'name', 'status']])
+            ->assertJsonPath('data.name', 'NewR');
     }
 
     public function test_admin_can_update(): void
@@ -58,7 +61,8 @@ class ResourceControllerTest extends TestCase
         $r = Resource::create(['name' => 'Trans', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10, 'status' => 'available']);
         $admin = $this->createUser('admin');
         $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'reserved'], $this->authHeaders($admin))
-            ->assertOk();
+            ->assertOk()
+            ->assertJsonPath('data.status', 'reserved');
     }
 
     public function test_admin_transition_invalid(): void
@@ -66,7 +70,8 @@ class ResourceControllerTest extends TestCase
         $r = Resource::create(['name' => 'BadT', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10, 'status' => 'available']);
         $admin = $this->createUser('admin');
         $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'in_use'], $this->authHeaders($admin))
-            ->assertStatus(422);
+            ->assertStatus(422)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_admin_store_with_parent_id(): void
@@ -83,7 +88,9 @@ class ResourceControllerTest extends TestCase
         $staff = $this->createStaffWithProfile('staff');
         $this->postJson('/api/resources', [
             'name' => 'X', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
-        ], $this->authHeaders($staff))->assertStatus(403);
+        ], $this->authHeaders($staff))
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_group_leader_cannot_store(): void
@@ -91,7 +98,9 @@ class ResourceControllerTest extends TestCase
         $leader = $this->createStaffWithProfile('group-leader');
         $this->postJson('/api/resources', [
             'name' => 'X', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id,
-        ], $this->authHeaders($leader))->assertStatus(403);
+        ], $this->authHeaders($leader))
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_staff_cannot_transition(): void
@@ -99,6 +108,7 @@ class ResourceControllerTest extends TestCase
         $r = Resource::create(['name' => 'X', 'service_area_id' => $this->sa->id, 'role_id' => $this->role->id, 'capacity_hours' => 10, 'status' => 'available']);
         $staff = $this->createStaffWithProfile('staff');
         $this->postJson("/api/resources/{$r->id}/transition", ['status' => 'reserved'], $this->authHeaders($staff))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 }

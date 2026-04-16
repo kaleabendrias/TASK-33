@@ -26,7 +26,8 @@
         "psr-4": {
             "Tests\\": "tests/",
             "UnitTests\\": "../unit_tests/",
-            "ApiTests\\": "../API_tests/"
+            "ApiTests\\": "../API_tests/",
+            "FrontendTests\\": "../frontend_tests/"
         }
     },
     "scripts": {

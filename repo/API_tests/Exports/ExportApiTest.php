@@ -70,6 +70,7 @@ class ExportApiTest extends TestCase
             'date_from' => '2026-01-01', 'date_to' => '2026-12-31',
         ], $this->authHeaders($admin));
         $resp->assertOk();
+        $this->assertEquals('text/csv; charset=UTF-8', $resp->headers->get('content-type'));
     }
 
     public function test_export_validates_dates(): void
@@ -78,7 +79,9 @@ class ExportApiTest extends TestCase
         $this->postJson('/api/exports', [
             'type' => 'orders', 'format' => 'csv',
             'date_from' => '2026-12-31', 'date_to' => '2026-01-01',
-        ], $this->authHeaders($admin))->assertStatus(422);
+        ], $this->authHeaders($admin))
+            ->assertStatus(422)
+            ->assertJsonStructure(['message', 'errors']);
     }
 
     public function test_export_unauthenticated_rejected(): void
@@ -86,6 +89,7 @@ class ExportApiTest extends TestCase
         $this->postJson('/api/exports', [
             'type' => 'orders', 'format' => 'csv',
             'date_from' => '2026-01-01', 'date_to' => '2026-12-31',
-        ])->assertStatus(401);
+        ])->assertStatus(401)
+          ->assertJsonStructure(['message']);
     }
 }

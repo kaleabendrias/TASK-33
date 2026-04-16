@@ -1,9 +1,9 @@
 <?php
 
-namespace ApiTests\Security;
+namespace UnitTests\Security;
 
-use ApiTests\TestCase;
 use Illuminate\Support\Facades\Http;
+use UnitTests\TestCase;
 
 /**
  * Regression coverage for the Zero-Config-File security model.
@@ -130,19 +130,6 @@ class EnvironmentHardeningTest extends TestCase
             $this->markTestSkipped('pgAdmin service is not reachable from this test runner');
         }
 
-        // pgAdmin's authentication endpoint always returns a 302 — the
-        // location header is the only signal that distinguishes success
-        // from failure:
-        //
-        //   * SUCCESSFUL login → 302 with `Location: /browser/` (the
-        //     authenticated landing page).
-        //   * FAILED login     → 302 with `Location: /login` (kicks the
-        //     user back to the login form).
-        //
-        // Asserting the location header does NOT route the caller to
-        // /browser is the narrowest possible regression check that
-        // proves the historical `admin@local.dev / admin` defaults no
-        // longer authenticate.
         $this->assertSame(302, $resp->status(),
             'pgAdmin /authenticate/login should redirect (302) regardless of outcome');
 

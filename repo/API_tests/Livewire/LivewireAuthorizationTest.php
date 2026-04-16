@@ -13,7 +13,6 @@ use App\Livewire\Orders\OrderIndex;
 use App\Livewire\Orders\OrderShow;
 use App\Livewire\Settlement\CommissionReport;
 use App\Livewire\Settlement\SettlementIndex;
-use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 use ApiTests\TestCase;
 
@@ -83,11 +82,6 @@ class LivewireAuthorizationTest extends TestCase
         $staff = $this->createUser('staff');
         StaffProfile::create(['user_id' => $staff->id, 'employee_id' => 'E', 'department' => 'D', 'title' => 'T']);
         $order = $this->makeOrder($staff);
-
-        // Stub outbound HTTP so the API call inside the Livewire action is deterministic.
-        Http::fake([
-            '*/orders/*/transition' => Http::response(['data' => ['status' => 'checked_in']], 200),
-        ]);
 
         $this->actAs($staff);
         $component = Livewire::test(OrderShow::class, ['orderId' => $order->id]);

@@ -45,7 +45,8 @@ class ServiceAreaControllerTest extends TestCase
     {
         $admin = $this->createUser('admin');
         $this->postJson('/api/service-areas', [], $this->authHeaders($admin))
-            ->assertStatus(422);
+            ->assertStatus(422)
+            ->assertJsonStructure(['message', 'errors']);
     }
 
     public function test_admin_can_update(): void
@@ -61,21 +62,24 @@ class ServiceAreaControllerTest extends TestCase
     {
         $staff = $this->createStaffWithProfile('staff');
         $this->postJson('/api/service-areas', ['name' => 'Forbidden'], $this->authHeaders($staff))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_group_leader_cannot_store(): void
     {
         $leader = $this->createStaffWithProfile('group-leader');
         $this->postJson('/api/service-areas', ['name' => 'Forbidden'], $this->authHeaders($leader))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_user_cannot_store(): void
     {
         $user = $this->createUser('user');
         $this->postJson('/api/service-areas', ['name' => 'Forbidden'], $this->authHeaders($user))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 
     public function test_staff_cannot_update(): void
@@ -83,6 +87,7 @@ class ServiceAreaControllerTest extends TestCase
         $staff = $this->createStaffWithProfile('staff');
         $sa = ServiceArea::first();
         $this->putJson("/api/service-areas/{$sa->id}", ['name' => 'X'], $this->authHeaders($staff))
-            ->assertStatus(403);
+            ->assertStatus(403)
+            ->assertJsonStructure(['message']);
     }
 }

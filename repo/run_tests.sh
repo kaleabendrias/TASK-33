@@ -18,6 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 MIN_COVERAGE=90
+MIN_COVERAGE_FE=50   # frontend_tests focus on property state; full paths covered by API_tests
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
@@ -121,22 +122,30 @@ run_suite "API_tests" "phpunit.api.xml"
 API_EXIT=${API_tests_exit:-1}
 API_COV=${API_tests_cov:-0}
 
-# ── 6. Final report ─────────────────────────────────────────────────
+# ── 6. Run frontend_tests ───────────────────────────────────────────
+run_suite "frontend_tests" "phpunit.frontend.xml"
+FE_EXIT=${frontend_tests_exit:-1}
+FE_COV=${frontend_tests_cov:-0}
+
+# ── 7. Final report ─────────────────────────────────────────────────
 echo ""
 echo "╔══════════════════════════════════════════════════╗"
 echo "║            TEST RESULTS SUMMARY                  ║"
 echo "╠══════════════════════════════════════════════════╣"
-printf "║  unit_tests:  %-6s  Coverage: %6s%%           ║\n" \
+printf "║  unit_tests:     %-6s  Coverage: %6s%%        ║\n" \
     "$([ "${UNIT_EXIT}" -eq 0 ] && echo "PASS" || echo "FAIL")" "${UNIT_COV}"
-printf "║  API_tests:   %-6s  Coverage: %6s%%           ║\n" \
+printf "║  API_tests:      %-6s  Coverage: %6s%%        ║\n" \
     "$([ "${API_EXIT}" -eq 0 ] && echo "PASS" || echo "FAIL")" "${API_COV}"
-echo "║  Minimum required: ${MIN_COVERAGE}%                         ║"
+printf "║  frontend_tests: %-6s  Coverage: %6s%%        ║\n" \
+    "$([ "${FE_EXIT}" -eq 0 ] && echo "PASS" || echo "FAIL")" "${FE_COV}"
+echo "║  Min required: ${MIN_COVERAGE}% (unit/API), ${MIN_COVERAGE_FE}% (frontend)     ║"
 echo "╚══════════════════════════════════════════════════╝"
 echo ""
 
 FINAL=0
 [ "${UNIT_EXIT}" -ne 0 ] && { fail "unit_tests FAILED"; FINAL=1; }
 [ "${API_EXIT}"  -ne 0 ] && { fail "API_tests FAILED"; FINAL=1; }
+[ "${FE_EXIT}"   -ne 0 ] && { fail "frontend_tests FAILED"; FINAL=1; }
 
 check_cov() {
     local n="$1" c="$2"; local i=${c%%.*}
@@ -146,7 +155,13 @@ check_cov() {
     info "${n} coverage ${c}% >= ${MIN_COVERAGE}% ✓"; return 0
 }
 
-check_cov "unit_tests" "${UNIT_COV}" || FINAL=1
-check_cov "API_tests"  "${API_COV}"  || FINAL=1
+check_cov "unit_tests"     "${UNIT_COV}" || FINAL=1
+check_cov "API_tests"      "${API_COV}"  || FINAL=1
+# frontend_tests: lower threshold — tests cover property state / rendering;
+# full execution paths through Livewire are exercised by API_tests.
+MIN_COVERAGE_SAVED=$MIN_COVERAGE
+MIN_COVERAGE=$MIN_COVERAGE_FE
+check_cov "frontend_tests" "${FE_COV}"   || FINAL=1
+MIN_COVERAGE=$MIN_COVERAGE_SAVED
 
 exit ${FINAL}
