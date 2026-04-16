@@ -103,6 +103,11 @@ class InternalApiClient
         return $this->dispatch('PUT', $path, [], $body);
     }
 
+    public function delete(string $path): InternalApiResponse
+    {
+        return $this->dispatch('DELETE', $path);
+    }
+
     private function dispatch(string $method, string $path, array $query = [], array $body = []): InternalApiResponse
     {
         $url = '/api' . $path;
